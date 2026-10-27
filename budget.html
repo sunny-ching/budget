@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="記帳本">
+<title>記帳本</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F6F2E7;
+    --paper-line:#DCD4BC;
+    --ink:#232C25;
+    --ink-soft:#5B6459;
+    --green:#1F6F4A;
+    --green-deep:#164F35;
+    --gold:#9C7A1E;
+    --red:#B33A2E;
+    --card:#FFFDF7;
+    --shadow: 0 1px 0 rgba(35,44,37,0.06);
+  }
+  *{box-sizing:border-box;}
+  html{ -webkit-text-size-adjust:100%; }
+  body{
+    margin:0;
+    background:var(--paper);
+    background-image: repeating-linear-gradient(
+      to bottom, transparent, transparent 35px, var(--paper-line) 35px, var(--paper-line) 36px
+    );
+    color:var(--ink);
+    font-family:'Noto Sans TC', sans-serif;
+    min-height:100vh;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+  header{
+    padding: 28px 20px 14px;
+    border-bottom: 3px double var(--green-deep);
+  }
+  header h1{
+    font-family:'Noto Serif TC', serif;
+    font-weight:700;
+    font-size: 28px;
+    margin:0 0 4px;
+    color: var(--green-deep);
+    letter-spacing: 1px;
+  }
+  header p{
+    margin:0;
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  #warn{
+    margin:12px 16px 0;
+    padding:10px 14px;
+    border-radius:8px;
+    border-left:5px solid var(--red);
+    background:#FBEAE7;
+    font-size:13.5px;
+    line-height:1.6;
+  }
+  nav{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    padding: 12px 16px 0;
+  }
+  nav button{
+    font-family:'Noto Serif TC', serif;
+    font-size:14px;
+    padding:9px 16px 8px;
+    border:1px solid var(--green-deep);
+    border-bottom:none;
+    background: #EDE7D6;
+    color:var(--green-deep);
+    cursor:pointer;
+    border-radius:6px 6px 0 0;
+    position:relative;
+    top:1px;
+  }
+  nav button.active{
+    background: var(--card);
+    color:var(--ink);
+    font-weight:700;
+  }
+  main{
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 18px 16px 60px;
+  }
+  .panel{
+    background: var(--card);
+    border:1px solid var(--green-deep);
+    border-radius: 0 8px 8px 8px;
+    padding: 18px 18px 22px;
+    box-shadow: var(--shadow);
+    overflow-x:auto;
+  }
+  h2{
+    font-family:'Noto Serif TC', serif;
+    font-size:19px;
+    margin: 0 0 4px;
+    color: var(--green-deep);
+  }
+  .hint{
+    font-size:12.5px;
+    color:var(--ink-soft);
+    margin:0 0 16px;
+    line-height:1.6;
+  }
+  table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:14px;
+    margin-bottom:16px;
+  }
+  th{
+    text-align:left;
+    font-weight:700;
+    font-size:12.5px;
+    color:var(--green-deep);
+    border-bottom:2px solid var(--green-deep);
+    padding:6px 8px;
+    white-space:nowrap;
+  }
+  td{
+    padding:7px 8px;
+    border-bottom:1px solid var(--paper-line);
+  }
+  td.num, th.num{ text-align:right; font-variant-numeric: tabular-nums; white-space:nowrap; }
+  tr:hover td{ background: rgba(31,111,74,0.05); }
+  .del-btn{
+    background:none;
+    border:1px solid var(--red);
+    color:var(--red);
+    border-radius:5px;
+    font-size:12px;
+    padding:2px 8px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .del-btn:hover{ background: var(--red); color:#fff; }
+  .add-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    align-items:flex-end;
+    padding-top:12px;
+    border-top: 1px dashed var(--paper-line);
+  }
+  .field{ display:flex; flex-direction:column; gap:3px; }
+  .field label{ font-size:11.5px; color:var(--ink-soft); }
+  select, input{
+    font-family:'Noto Sans TC', sans-serif;
+    font-size:13.5px;
+    padding:7px 8px;
+    border:1px solid #C9C2AC;
+    border-radius:5px;
+    background:#fff;
+    color:var(--ink);
+  }
+  @media (max-width:640px){
+    /* 16px keeps iPhone Safari from zooming in when a field is focused */
+    select, input{ font-size:16px; }
+  }
+  input[type=number]{ width:110px; }
+  input[type=date], input[type=month]{ width:150px; }
+  .btn{
+    font-family:'Noto Serif TC', serif;
+    background: var(--green);
+    color:#fff;
+    border:none;
+    border-radius:5px;
+    padding:8px 16px;
+    font-size:13.5px;
+    cursor:pointer;
+    font-weight:700;
+  }
+  .btn:hover{ background: var(--green-deep); }
+  .btn.secondary{
+    background:#fff;
+    color:var(--green-deep);
+    border:1px solid var(--green-deep);
+  }
+  .total-row td{
+    font-weight:700;
+    border-top:2px solid var(--green-deep);
+    border-bottom:none;
+  }
+  .grid2{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap:14px;
+  }
+  @media (max-width:640px){ .grid2{ grid-template-columns: 1fr; } }
+  .stat{
+    background:#fff;
+    border:1px solid var(--paper-line);
+    border-radius:8px;
+    padding:12px 14px;
+  }
+  .stat .label{ font-size:12px; color:var(--ink-soft); }
+  .stat .value{ font-size:22px; font-weight:700; font-family:'Noto Serif TC',serif; margin-top:2px; }
+  .advice{
+    margin-top:16px;
+    padding:14px 16px;
+    border-radius:8px;
+    border-left:5px solid var(--gold);
+    background: #FBF6E3;
+    font-size:14px;
+    line-height:1.7;
+  }
+  .advice.warn{ border-left-color:var(--red); background:#FBEAE7; }
+  .advice.good{ border-left-color:var(--green); background:#EAF4EE; }
+  .note{ font-size:11.5px; color:var(--ink-soft); margin-top:10px; }
+  .member-tag{
+    display:inline-block;
+    background:#EDE7D6;
+    border-radius:4px;
+    padding:1px 7px;
+    font-size:12px;
+    color:var(--green-deep);
+  }
+  .settings-block{ margin-bottom:22px; }
+  .chip-list{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  .chip{
+    display:flex; align-items:center; gap:6px;
+    background:#EDE7D6; border-radius:16px; padding:4px 6px 4px 12px; font-size:13px;
+  }
+  .chip button{
+    background:none; border:none; color:var(--red); cursor:pointer; font-size:13px; padding:0 4px;
+  }
+  .loading{ padding:60px 20px; text-align:center; color:var(--ink-soft); font-family:'Noto Serif TC',serif; }
+  .empty{ color:var(--ink-soft); font-size:13px; padding:10px 0; }
+  .backup-msg{ font-size:13px; color:var(--ink-soft); margin-top:8px; min-height:1.2em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>記帳本 · 月月都能用</h1>
+  <p>固定支出設定一次就好，每天只要記帳和看建議 — 資料自動儲存在這個瀏覽器，下個月還在</p>
+</header>
+<div id="warn" hidden></div>
+<nav id="tabs"></nav>
+<main><div class="panel" id="content"><div class="loading">讀取資料中…</div></div></main>
+
+<script>
+const STORAGE_KEY = 'budget-app-state-v1';
+
+const DEFAULT_CATEGORIES = {
+  "餐飲": ["早餐","午餐","晚餐","飲料","零食"],
+  "交通": ["大眾運輸","計程車","加油","停車費"],
+  "日用品": ["衛生紙","清潔用品","盥洗用品","保養品"],
+  "娛樂": ["電影","遊戲","訂閱服務","潛水","旅遊","唱歌"],
+  "醫療": ["掛號費","藥品","保健品"],
+  "教育": ["書籍","課程","文具"],
+  "居住": ["房租","水電瓦斯","網路費","管理費"],
+  "保險稅務": ["汽車保險","健康保險","牌照稅","房屋稅"],
+  "其他": ["其他"],
+  "狗狗": ["飼料","魚油","益生菌","骨頭保健","其他保健品","玩具"]
+};
+const INCOME_TYPES = ["基本月薪","加班費","獎金","投資收益","代墊款項","利息收入","其他"];
+const LIST_KEYS = ['fixedMonthly','annualItems','variableItems','dailyExpenses','incomes'];
+
+let state = null;
+let activeTab = 'overview';
+
+function uid(){ return Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
+function pad2(n){ return String(n).padStart(2,'0'); }
+// Local date, not UTC: toISOString() would give "yesterday" in Taiwan before 08:00.
+function localDateStr(d){ d = d || new Date(); return d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate()); }
+function todayStr(){ return localDateStr(); }
+function thisMonthStr(){ return todayStr().slice(0,7); }
+function money(n){ return 'NT$' + Math.round(n||0).toLocaleString('zh-TW'); }
+function moneyF(n){ return 'NT$' + (n||0).toLocaleString('zh-TW', {maximumFractionDigits:1}); }
+function daysInMonth(ym){ const [y,m]=ym.split('-').map(Number); return new Date(y,m,0).getDate(); }
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function defaultState(){
+  return {
+    categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
+    members: ["Nimo"],
+    fixedMonthly: [],
+    annualItems: [],
+    variableItems: [],
+    dailyExpenses: [],
+    incomes: []
+  };
+}
+
+function setWarn(msg){
+  const w = document.getElementById('warn');
+  if(msg){ w.textContent = msg; w.hidden = false; } else { w.hidden = true; }
+}
+
+function loadState(){
+  let raw = null;
+  try{ raw = localStorage.getItem(STORAGE_KEY); }
+  catch(e){ setWarn('這個瀏覽器不允許儲存網站資料（可能是無痕模式），記的帳無法保留。請改用一般瀏覽模式。'); }
+  state = defaultState();
+  if(raw){
+    try{
+      const parsed = JSON.parse(raw);
+      if(parsed && typeof parsed === 'object'){
+        const d = defaultState();
+        for(const k in d){
+          const ok = LIST_KEYS.includes(k) || k === 'members' ? Array.isArray(parsed[k]) : (parsed[k] && typeof parsed[k] === 'object');
+          state[k] = ok ? parsed[k] : d[k];
+        }
+      }
+    } catch(e){
+      console.error('load failed', e);
+      try{ localStorage.setItem(STORAGE_KEY + '-corrupt', raw); } catch(_){}
+    }
+  }
+}
+
+// Saves immediately on every change, so closing the page cannot lose anything.
+function saveState(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    return true;
+  } catch(e){
+    console.error('save failed', e);
+    setWarn('儲存失敗：這個瀏覽器不允許儲存網站資料，剛才記的帳不會保留。請改用一般瀏覽模式，或到設定匯出備份。');
+    return false;
+  }
+}
+
+function catOptions(selected){
+  return Object.keys(state.categories).map(c =>
+    `<option value="${esc(c)}" ${c===selected?'selected':''}>${esc(c)}</option>`).join('');
+}
+function itemOptions(cat, selected){
+  const items = state.categories[cat] || [];
+  return items.map(i => `<option value="${esc(i)}" ${i===selected?'selected':''}>${esc(i)}</option>`).join('');
+}
+function memberOptions(selected){
+  return state.members.map(m => `<option value="${esc(m)}" ${m===selected?'selected':''}>${esc(m)}</option>`).join('');
+}
+function memberOptionsBlank(selected){
+  return `<option value="">（不指定）</option>` + memberOptions(selected);
+}
+
+// ---------- Tab definitions ----------
+const TABS = [
+  {id:'overview', label:'總覽與建議'},
+  {id:'fixed', label:'固定月費'},
+  {id:'annual', label:'年度花費'},
+  {id:'variable', label:'彈性消耗品'},
+  {id:'daily', label:'每日花費'},
+  {id:'income', label:'收入'},
+  {id:'settings', label:'設定'},
+];
+
+function renderTabs(){
+  const nav = document.getElementById('tabs');
+  nav.innerHTML = TABS.map(t =>
+    `<button class="${t.id===activeTab?'active':''}" data-tab="${t.id}">${t.label}</button>`
+  ).join('');
+  nav.querySelectorAll('button').forEach(b=>{
+    b.onclick = ()=>{ activeTab = b.dataset.tab; render(); };
+  });
+}
+
+// ---------- Generic simple cost tables (固定月費 / 年度花費 share the same shape) ----------
+function renderSimpleCostTab(key, opts){
+  const rows = state[key];
+  const total = rows.reduce((s,r)=>s+Number(r.amount||0),0);
+  const totalDaily = total/opts.divisor;
+  let html = `<h2>${opts.title}</h2><p class="hint">${opts.hint}</p>`;
+  html += `<table><thead><tr><th>類別</th><th>項目</th><th class="num">${opts.amountLabel}</th><th class="num">每日成本</th><th></th></tr></thead><tbody>`;
+  if(rows.length===0){
+    html += `<tr><td colspan="5" class="empty">尚無資料，請在下方新增</td></tr>`;
+  }
+  rows.forEach(r=>{
+    const daily = Number(r.amount||0)/opts.divisor;
+    html += `<tr>
+      <td>${esc(r.category)}</td><td>${esc(r.item)}</td>
+      <td class="num">${money(r.amount)}</td><td class="num">${moneyF(daily)}</td>
+      <td><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
+    </tr>`;
+  });
+  html += `<tr class="total-row"><td colspan="2">加總</td><td class="num">${money(total)}</td><td class="num">${moneyF(totalDaily)}</td><td></td></tr>`;
+  html += `</tbody></table>`;
+  html += `<div class="add-row">
+    <div class="field"><label>類別</label><select id="new-cat">${catOptions()}</select></div>
+    <div class="field"><label>項目</label><select id="new-item">${itemOptions(Object.keys(state.categories)[0])}</select></div>
+    <div class="field"><label>${opts.amountLabel}</label><input type="number" id="new-amount" min="0" inputmode="decimal" placeholder="0"></div>
+    <button class="btn" id="new-add">新增</button>
+  </div>`;
+  document.getElementById('content').innerHTML = html;
+
+  document.getElementById('new-cat').onchange = (e)=>{
+    document.getElementById('new-item').innerHTML = itemOptions(e.target.value);
+  };
+  document.getElementById('new-add').onclick = ()=>{
+    const cat = document.getElementById('new-cat').value;
+    const item = document.getElementById('new-item').value;
+    const amount = Number(document.getElementById('new-amount').value);
+    if(!amount){ alert('請填寫金額'); return; }
+    state[key].push({id:uid(), category:cat, item, amount});
+    saveState();
+    render();
+  };
+  document.querySelectorAll('[data-del]').forEach(b=>{
+    b.onclick = ()=>{
+      state[key] = state[key].filter(r=>r.id!==b.dataset.del);
+      saveState();
+      render();
+    };
+  });
+}
+
+// ---------- 彈性消耗品 ----------
+function renderVariableTab(){
+  const rows = state.variableItems;
+  let knownTotal = 0;
+  let html = `<h2>彈性消耗品</h2>
+  <p class="hint">用量不確定的東西：先填購買日期與金額；等下次真的再買、東西用完時，回來填「下次購買日期」，就會自動算出這段期間的每日成本。</p>`;
+  html += `<table><thead><tr><th>類別</th><th>品項</th><th>購買日期</th><th class="num">金額</th><th>下次購買日期</th><th class="num">每日成本</th><th></th></tr></thead><tbody>`;
+  if(rows.length===0){
+    html += `<tr><td colspan="7" class="empty">尚無資料，請在下方新增</td></tr>`;
+  }
+  rows.forEach(r=>{
+    let dailyText = '待下次購買後計算';
+    let dailyVal = null;
+    if(r.nextBuyDate){
+      const days = (new Date(r.nextBuyDate) - new Date(r.buyDate)) / 86400000;
+      if(days > 0){ dailyVal = Number(r.amount)/days; dailyText = moneyF(dailyVal); }
+    }
+    if(dailyVal) knownTotal += dailyVal;
+    html += `<tr>
+      <td>${esc(r.category)}</td><td>${esc(r.item)}</td><td>${esc(r.buyDate)}</td>
+      <td class="num">${money(r.amount)}</td>
+      <td>
+        <input type="date" value="${esc(r.nextBuyDate||'')}" data-next="${esc(r.id)}" style="width:150px">
+      </td>
+      <td class="num">${dailyText}</td>
+      <td><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
+    </tr>`;
+  });
+  html += `<tr class="total-row"><td colspan="5">加總（已知每日成本）</td><td class="num">${moneyF(knownTotal)}</td><td></td></tr>`;
+  html += `</tbody></table>`;
+  html += `<div class="add-row">
+    <div class="field"><label>類別</label><select id="new-cat">${catOptions()}</select></div>
+    <div class="field"><label>品項</label><select id="new-item">${itemOptions(Object.keys(state.categories)[0])}</select></div>
+    <div class="field"><label>購買日期</label><input type="date" id="new-buydate" value="${todayStr()}"></div>
+    <div class="field"><label>金額</label><input type="number" id="new-amount" min="0" inputmode="decimal" placeholder="0"></div>
+    <button class="btn" id="new-add">新增</button>
+  </div>`;
+  document.getElementById('content').innerHTML = html;
+
+  document.getElementById('new-cat').onchange = (e)=>{
+    document.getElementById('new-item').innerHTML = itemOptions(e.target.value);
+  };
+  document.getElementById('new-add').onclick = ()=>{
+    const cat = document.getElementById('new-cat').value;
+    const item = document.getElementById('new-item').value;
+    const buyDate = document.getElementById('new-buydate').value;
+    const amount = Number(document.getElementById('new-amount').value);
+    if(!amount || !buyDate){ alert('請填寫購買日期與金額'); return; }
+    state.variableItems.push({id:uid(), category:cat, item, buyDate, amount, nextBuyDate:''});
+    saveState();
+    render();
+  };
+  document.querySelectorAll('[data-next]').forEach(inp=>{
+    inp.onchange = ()=>{
+      const row = state.variableItems.find(r=>r.id===inp.dataset.next);
+      if(!row) return;
+      row.nextBuyDate = inp.value;
+      saveState();
+      render();
+    };
+  });
+  document.querySelectorAll('[data-del]').forEach(b=>{
+    b.onclick = ()=>{
+      state.variableItems = state.variableItems.filter(r=>r.id!==b.dataset.del);
+      saveState();
+      render();
+    };
+  });
+}
+
+// ---------- 每日花費 ----------
+function renderDailyTab(){
+  const rows = [...state.dailyExpenses].sort((a,b)=> String(b.date).localeCompare(String(a.date)));
+  const total = rows.reduce((s,r)=>s+Number(r.amount||0),0);
+  let html = `<h2>每日花費</h2><p class="hint">記錄每天實際花費，可指定使用成員。</p>`;
+  html += `<table><thead><tr><th>日期</th><th>成員</th><th>類別</th><th>項目</th><th class="num">金額</th><th></th></tr></thead><tbody>`;
+  if(rows.length===0){
+    html += `<tr><td colspan="6" class="empty">尚無資料，請在下方新增</td></tr>`;
+  }
+  rows.forEach(r=>{
+    html += `<tr>
+      <td>${esc(r.date)}</td>
+      <td>${r.member?`<span class="member-tag">${esc(r.member)}</span>`:'—'}</td>
+      <td>${esc(r.category)}</td><td>${esc(r.item)}</td>
+      <td class="num">${money(r.amount)}</td>
+      <td><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
+    </tr>`;
+  });
+  html += `<tr class="total-row"><td colspan="4">加總</td><td class="num">${money(total)}</td><td></td></tr>`;
+  html += `</tbody></table>`;
+  html += `<div class="add-row">
+    <div class="field"><label>日期</label><input type="date" id="new-date" value="${todayStr()}"></div>
+    <div class="field"><label>成員</label><select id="new-member">${memberOptionsBlank()}</select></div>
+    <div class="field"><label>類別</label><select id="new-cat">${catOptions()}</select></div>
+    <div class="field"><label>項目</label><select id="new-item">${itemOptions(Object.keys(state.categories)[0])}</select></div>
+    <div class="field"><label>金額</label><input type="number" id="new-amount" min="0" inputmode="decimal" placeholder="0"></div>
+    <button class="btn" id="new-add">新增</button>
+  </div>`;
+  document.getElementById('content').innerHTML = html;
+
+  document.getElementById('new-cat').onchange = (e)=>{
+    document.getElementById('new-item').innerHTML = itemOptions(e.target.value);
+  };
+  document.getElementById('new-add').onclick = ()=>{
+    const date = document.getElementById('new-date').value;
+    const member = document.getElementById('new-member').value;
+    const cat = document.getElementById('new-cat').value;
+    const item = document.getElementById('new-item').value;
+    const amount = Number(document.getElementById('new-amount').value);
+    if(!amount || !date){ alert('請填寫日期與金額'); return; }
+    state.dailyExpenses.push({id:uid(), date, member, category:cat, item, amount});
+    saveState();
+    render();
+  };
+  document.querySelectorAll('[data-del]').forEach(b=>{
+    b.onclick = ()=>{
+      state.dailyExpenses = state.dailyExpenses.filter(r=>r.id!==b.dataset.del);
+      saveState();
+      render();
+    };
+  });
+}
+
+// ---------- 收入 ----------
+function renderIncomeTab(){
+  const rows = [...state.incomes].sort((a,b)=> String(b.date).localeCompare(String(a.date)));
+  const total = rows.reduce((s,r)=>s+Number(r.amount||0),0);
+  let html = `<h2>收入</h2><p class="hint">記錄每一筆收入，例如基本月薪、加班費、獎金、投資收益、代墊款項、利息收入等，可指定成員。</p>`;
+  html += `<table><thead><tr><th>日期</th><th>成員</th><th>類型</th><th>備註</th><th class="num">金額</th><th></th></tr></thead><tbody>`;
+  if(rows.length===0){
+    html += `<tr><td colspan="6" class="empty">尚無資料，請在下方新增</td></tr>`;
+  }
+  rows.forEach(r=>{
+    html += `<tr>
+      <td>${esc(r.date)}</td>
+      <td>${r.member?`<span class="member-tag">${esc(r.member)}</span>`:'—'}</td>
+      <td>${esc(r.type)}</td><td>${esc(r.note||'')}</td>
+      <td class="num">${money(r.amount)}</td>
+      <td><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
+    </tr>`;
+  });
+  html += `<tr class="total-row"><td colspan="4">加總</td><td class="num">${money(total)}</td><td></td></tr>`;
+  html += `</tbody></table>`;
+  html += `<div class="add-row">
+    <div class="field"><label>日期</label><input type="date" id="new-date" value="${todayStr()}"></div>
+    <div class="field"><label>成員</label><select id="new-member">${memberOptionsBlank()}</select></div>
+    <div class="field"><label>類型</label><select id="new-type">${INCOME_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
+    <div class="field"><label>備註（選填）</label><input type="text" id="new-note" placeholder="例如：幫同事代墊的午餐"></div>
+    <div class="field"><label>金額</label><input type="number" id="new-amount" min="0" inputmode="decimal" placeholder="0"></div>
+    <button class="btn" id="new-add">新增</button>
+  </div>`;
+  document.getElementById('content').innerHTML = html;
+
+  document.getElementById('new-add').onclick = ()=>{
+    const date = document.getElementById('new-date').value;
+    const member = document.getElementById('new-member').value;
+    const type = document.getElementById('new-type').value;
+    const note = document.getElementById('new-note').value;
+    const amount = Number(document.getElementById('new-amount').value);
+    if(!amount || !date){ alert('請填寫日期與金額'); return; }
+    state.incomes.push({id:uid(), date, member, type, note, amount});
+    saveState();
+    render();
+  };
+  document.querySelectorAll('[data-del]').forEach(b=>{
+    b.onclick = ()=>{
+      state.incomes = state.incomes.filter(r=>r.id!==b.dataset.del);
+      saveState();
+      render();
+    };
+  });
+}
+
+// ---------- 總覽與建議 ----------
+let overviewMonth = thisMonthStr();
+function renderOverviewTab(){
+  const dim = daysInMonth(overviewMonth);
+
+  const fixedDaily = state.fixedMonthly.reduce((s,r)=>s+Number(r.amount||0),0)/30;
+  const annualDaily = state.annualItems.reduce((s,r)=>s+Number(r.amount||0),0)/365;
+  const variableDaily = state.variableItems.reduce((s,r)=>{
+    if(r.nextBuyDate){
+      const days = (new Date(r.nextBuyDate) - new Date(r.buyDate)) / 86400000;
+      if(days > 0) return s + Number(r.amount)/days;
+    }
+    return s;
+  },0);
+
+  const monthDaily = state.dailyExpenses.filter(r=>String(r.date).startsWith(overviewMonth));
+  const monthDailyTotal = monthDaily.reduce((s,r)=>s+Number(r.amount||0),0);
+
+  const recurringDailyTotal = fixedDaily+annualDaily+variableDaily;
+  const monthExpenseEstimate = recurringDailyTotal*dim + monthDailyTotal;
+
+  const monthIncomes = state.incomes.filter(r=>String(r.date).startsWith(overviewMonth));
+  const monthIncomeTotal = monthIncomes.reduce((s,r)=>s+Number(r.amount||0),0);
+
+  const savings = monthIncomeTotal - monthExpenseEstimate;
+  const ratio = monthIncomeTotal>0 ? savings/monthIncomeTotal : null;
+
+  // income breakdown by type
+  const incomeByType = {};
+  monthIncomes.forEach(r=>{ incomeByType[r.type] = (incomeByType[r.type]||0) + Number(r.amount); });
+
+  // member breakdown for daily expenses
+  const memberSpend = {};
+  monthDaily.forEach(r=>{
+    const m = r.member || '未指定';
+    memberSpend[m] = (memberSpend[m]||0) + Number(r.amount);
+  });
+
+  let html = `<h2>總覽與建議</h2>
+  <p class="hint">固定月費、年度花費、彈性消耗品只要設定一次，之後每個月都會自動套用；每日花費和收入依你選的月份自動彙整。</p>
+  <div class="field" style="margin-bottom:16px;"><label>檢視月份</label><input type="month" id="month-pick" value="${overviewMonth}"></div>`;
+
+  html += `<div class="grid2">
+    <div class="stat"><div class="label">${overviewMonth} 收入合計</div><div class="value">${money(monthIncomeTotal)}</div></div>
+    <div class="stat"><div class="label">${overviewMonth} 支出估計</div><div class="value">${money(monthExpenseEstimate)}</div></div>
+    <div class="stat"><div class="label">固定＋年度＋消耗品（每日）</div><div class="value">${moneyF(recurringDailyTotal)}</div></div>
+    <div class="stat"><div class="label">當月已記錄花費</div><div class="value">${money(monthDailyTotal)}</div></div>
+  </div>`;
+
+  let adviceClass = 'advice', adviceText;
+  if(monthIncomeTotal===0){
+    adviceText = '這個月還沒有收入紀錄，先到「收入」分頁記一筆，才能算儲蓄比例。';
+  } else if(ratio<0){
+    adviceClass += ' warn';
+    adviceText = `⚠️ 這個月支出已經超過收入 ${money(-savings)}，建議先檢視「每日花費」和「彈性消耗品」有沒有能縮減的項目。`;
+  } else if(ratio<0.2){
+    adviceClass += ' warn';
+    adviceText = `⚠️ 這個月儲蓄比例約 ${(ratio*100).toFixed(1)}%，低於 20%，可以檢視非必要支出，看看哪些能減少。`;
+  } else {
+    adviceClass += ' good';
+    adviceText = `✅ 這個月儲蓄比例約 ${(ratio*100).toFixed(1)}%，狀況良好，可以考慮增加投資或緊急預備金。`;
+  }
+  html += `<div class="${adviceClass}">${adviceText}</div>`;
+  html += `<p class="note">參考原則：50/30/20 預算法（50%必要支出、30%生活享受、20%儲蓄投資）－一般理財常見原則，僅供參考，非個人化建議。</p>`;
+
+  // income breakdown
+  html += `<h2 style="margin-top:26px;">收入明細（依類型）</h2>`;
+  if(Object.keys(incomeByType).length===0){
+    html += `<p class="empty">這個月尚無收入紀錄</p>`;
+  } else {
+    html += `<table><tbody>`;
+    Object.entries(incomeByType).forEach(([t,v])=>{
+      html += `<tr><td>${esc(t)}</td><td class="num">${money(v)}</td></tr>`;
+    });
+    html += `</tbody></table>`;
+  }
+
+  // member breakdown
+  html += `<h2 style="margin-top:10px;">每日花費（依成員）</h2>`;
+  if(Object.keys(memberSpend).length===0){
+    html += `<p class="empty">這個月尚無每日花費紀錄</p>`;
+  } else {
+    html += `<table><tbody>`;
+    Object.entries(memberSpend).forEach(([m,v])=>{
+      html += `<tr><td>${esc(m)}</td><td class="num">${money(v)}</td></tr>`;
+    });
+    html += `</tbody></table>`;
+  }
+
+  document.getElementById('content').innerHTML = html;
+  document.getElementById('month-pick').onchange = (e)=>{
+    if(!e.target.value) return;
+    overviewMonth = e.target.value;
+    renderOverviewTab();
+  };
+}
+
+// ---------- 備份：匯出與匯入 ----------
+function cleanRecord(r){
+  const out = { id: String(r.id) };
+  ['category','item','date','member','type','note','buyDate','nextBuyDate'].forEach(k=>{
+    if(r[k] != null) out[k] = String(r[k]);
+  });
+  out.amount = Number(r.amount) || 0;
+  return out;
+}
+
+// Imported records are added; anything already here is kept. Nothing is overwritten or deleted.
+function mergeImported(data){
+  let added = 0;
+  LIST_KEYS.forEach(k=>{
+    const incoming = data && Array.isArray(data[k]) ? data[k] : [];
+    const have = new Set(state[k].map(r=>r.id));
+    incoming.forEach(r=>{
+      if(r && typeof r === 'object' && r.id != null && !have.has(String(r.id))){
+        state[k].push(cleanRecord(r));
+        have.add(String(r.id));
+        added++;
+      }
+    });
+  });
+  if(data && Array.isArray(data.members)){
+    data.members.forEach(m=>{
+      if(typeof m === 'string' && m && !state.members.includes(m)) state.members.push(m);
+    });
+  }
+  if(data && data.categories && typeof data.categories === 'object'){
+    Object.keys(data.categories).forEach(c=>{
+      const items = Array.isArray(data.categories[c]) ? data.categories[c] : [];
+      if(!state.categories[c]) state.categories[c] = [];
+      items.forEach(i=>{
+        if(typeof i === 'string' && i && !state.categories[c].includes(i)) state.categories[c].push(i);
+      });
+    });
+  }
+  return added;
+}
+
+function exportBackup(){
+  const blob = new Blob([JSON.stringify({ app:'budget-app', version:1, exportedAt:new Date().toISOString(), state:state }, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'budget-backup-' + todayStr() + '.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  const n = LIST_KEYS.reduce((s,k)=>s+state[k].length,0);
+  setBackupMsg('已匯出備份檔（共 ' + n + ' 筆紀錄）');
+}
+
+function setBackupMsg(t){
+  const el = document.getElementById('backup-msg');
+  if(el) el.textContent = t;
+}
+
+function importBackupFile(file){
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const parsed = JSON.parse(String(reader.result));
+      const data = parsed && parsed.state ? parsed.state : parsed;
+      if(!data || typeof data !== 'object') throw new Error('bad file');
+      const added = mergeImported(data);
+      const ok = saveState();
+      render();
+      setBackupMsg(ok ? ('已匯入，新增 ' + added + ' 筆紀錄，並已儲存') : '匯入成功，但這個瀏覽器不允許儲存網站資料');
+    } catch(e){
+      setBackupMsg('無法讀取這個檔案，請選擇之前匯出的備份檔');
+    }
+  };
+  reader.onerror = ()=> setBackupMsg('讀取檔案失敗');
+  reader.readAsText(file);
+}
+
+// ---------- 設定 ----------
+function renderSettingsTab(){
+  let html = `<h2>設定</h2><p class="hint">管理使用成員與消費類別／細項，改了之後所有分頁的下拉選單都會同步更新。</p>`;
+
+  html += `<div class="settings-block">
+    <h2 style="font-size:15px;">資料備份</h2>
+    <p class="hint" style="margin-bottom:10px;">資料只存在這個瀏覽器。換手機、換瀏覽器或清除網站資料前，請先匯出備份；在新的地方匯入，就會把紀錄加進去（不會覆蓋或刪除原有的）。</p>
+    <div class="add-row" style="border-top:none;padding-top:0;">
+      <button class="btn" id="export-btn" type="button">匯出備份</button>
+      <button class="btn secondary" id="import-btn" type="button">匯入備份</button>
+      <input type="file" id="import-file" accept=".json,application/json" hidden>
+    </div>
+    <div class="backup-msg" id="backup-msg"></div>
+  </div>`;
+
+  html += `<div class="settings-block">
+    <h2 style="font-size:15px;">使用成員</h2>
+    <div class="chip-list">${state.members.map(m=>
+      `<span class="chip">${esc(m)}<button data-del-member="${esc(m)}">✕</button></span>`).join('') || '<span class="empty">尚無成員</span>'}</div>
+    <div class="add-row">
+      <div class="field"><label>新增成員</label><input type="text" id="new-member-name" placeholder="例如：媽媽"></div>
+      <button class="btn secondary" id="add-member-btn">新增</button>
+    </div>
+  </div>`;
+
+  html += `<div class="settings-block">
+    <h2 style="font-size:15px;">類別與細項</h2>`;
+  Object.entries(state.categories).forEach(([cat, items])=>{
+    html += `<div style="margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <strong>${esc(cat)}</strong>
+        <button class="del-btn" data-del-cat="${esc(cat)}">刪除整個類別</button>
+      </div>
+      <div class="chip-list">
+        ${items.map(i=>`<span class="chip">${esc(i)}<button data-del-item="${esc(cat)}|${esc(i)}">✕</button></span>`).join('') || '<span class="empty">尚無細項</span>'}
+      </div>
+      <div class="add-row" style="border-top:none;padding-top:0;">
+        <input type="text" placeholder="新增細項" data-new-item-input="${esc(cat)}" style="max-width:160px;">
+        <button class="btn secondary" data-new-item-btn="${esc(cat)}">新增細項</button>
+      </div>
+    </div>`;
+  });
+  html += `<div class="add-row">
+    <div class="field"><label>新增類別</label><input type="text" id="new-cat-name" placeholder="例如：寵物"></div>
+    <button class="btn" id="add-cat-btn">新增類別</button>
+  </div>`;
+  html += `</div>`;
+
+  document.getElementById('content').innerHTML = html;
+
+  document.getElementById('export-btn').onclick = exportBackup;
+  document.getElementById('import-btn').onclick = ()=> document.getElementById('import-file').click();
+  document.getElementById('import-file').onchange = (e)=>{
+    const f = e.target.files && e.target.files[0];
+    if(f) importBackupFile(f);
+    e.target.value = '';
+  };
+
+  document.getElementById('add-member-btn').onclick = ()=>{
+    const v = document.getElementById('new-member-name').value.trim();
+    if(!v) return;
+    if(!state.members.includes(v)) state.members.push(v);
+    saveState();
+    render();
+  };
+  document.querySelectorAll('[data-del-member]').forEach(b=>{
+    b.onclick = ()=>{
+      state.members = state.members.filter(m=>m!==b.dataset.delMember);
+      saveState();
+      render();
+    };
+  });
+  document.getElementById('add-cat-btn').onclick = ()=>{
+    const v = document.getElementById('new-cat-name').value.trim();
+    if(!v) return;
+    if(!state.categories[v]) state.categories[v] = [];
+    saveState();
+    render();
+  };
+  document.querySelectorAll('[data-del-cat]').forEach(b=>{
+    b.onclick = ()=>{
+      if(!confirm(`確定要刪除「${b.dataset.delCat}」這個類別嗎？`)) return;
+      delete state.categories[b.dataset.delCat];
+      saveState();
+      render();
+    };
+  });
+  document.querySelectorAll('[data-del-item]').forEach(b=>{
+    b.onclick = ()=>{
+      const sep = b.dataset.delItem.indexOf('|');
+      const cat = b.dataset.delItem.slice(0, sep);
+      const item = b.dataset.delItem.slice(sep+1);
+      state.categories[cat] = (state.categories[cat] || []).filter(i=>i!==item);
+      saveState();
+      render();
+    };
+  });
+  document.querySelectorAll('[data-new-item-btn]').forEach(b=>{
+    b.onclick = ()=>{
+      const cat = b.dataset.newItemBtn;
+      const input = Array.from(document.querySelectorAll('[data-new-item-input]')).find(x=>x.dataset.newItemInput===cat);
+      const v = input ? input.value.trim() : '';
+      if(!v) return;
+      if(!state.categories[cat].includes(v)) state.categories[cat].push(v);
+      saveState();
+      render();
+    };
+  });
+}
+
+function render(){
+  renderTabs();
+  if(activeTab==='overview') renderOverviewTab();
+  else if(activeTab==='fixed') renderSimpleCostTab('fixedMonthly', {title:'固定月費', hint:'填每月固定要付的費用（訂閱、房租等），自動換算成每日成本（月費 ÷ 30）。', amountLabel:'月費', divisor:30});
+  else if(activeTab==='annual') renderSimpleCostTab('annualItems', {title:'年度花費', hint:'填一年繳一次的費用（保險、牌照稅、年費會員等），自動換算成每日成本（年費 ÷ 365）。', amountLabel:'年費', divisor:365});
+  else if(activeTab==='variable') renderVariableTab();
+  else if(activeTab==='daily') renderDailyTab();
+  else if(activeTab==='income') renderIncomeTab();
+  else if(activeTab==='settings') renderSettingsTab();
+}
+
+// Ask the browser not to clear this page's data when space runs low.
+try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e){}
+
+// Safety net: save again when the page is hidden or closed.
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden && state) saveState(); });
+window.addEventListener('pagehide', ()=>{ if(state) saveState(); });
+
+loadState();
+render();
+</script>
+</body>
+</html>
