@@ -6,6 +6,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="記帳本">
 <title>記帳本</title>
+<link rel="apple-touch-icon" href="budget-icon.png">
+<link rel="icon" type="image/png" href="budget-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -153,6 +155,7 @@
     border-top: 1px dashed var(--paper-line);
   }
   .field{ display:flex; flex-direction:column; gap:3px; }
+  .field.wide{ flex:1 1 100%; }
   .field label{ font-size:11.5px; color:var(--ink-soft); }
   select, input{
     font-family:'Noto Sans TC', sans-serif;
@@ -169,6 +172,14 @@
   }
   input[type=number]{ width:110px; }
   input[type=date], input[type=month]{ width:150px; }
+  .chk-list{ display:flex; flex-wrap:wrap; gap:6px; }
+  .field label.chk{
+    display:inline-flex; align-items:center; gap:6px;
+    padding:6px 12px 6px 9px;
+    border:1px solid #C9C2AC; border-radius:16px; background:#fff;
+    font-size:14px; color:var(--ink); cursor:pointer;
+  }
+  .chk input{ width:18px; height:18px; padding:0; margin:0; accent-color: var(--green); }
   .btn{
     font-family:'Noto Serif TC', serif;
     background: var(--green);
@@ -181,11 +192,16 @@
     font-weight:700;
   }
   .btn:hover{ background: var(--green-deep); }
+  .btn:disabled{ opacity:0.45; cursor:default; }
+  .btn:disabled:hover{ background: var(--green); }
   .btn.secondary{
     background:#fff;
     color:var(--green-deep);
     border:1px solid var(--green-deep);
   }
+  .btn.secondary:hover{ background:#EDE7D6; }
+  .btn.secondary:disabled:hover{ background:#fff; }
+  .btn.small{ padding:3px 10px; font-size:12px; }
   .total-row td{
     font-weight:700;
     border-top:2px solid var(--green-deep);
@@ -216,7 +232,7 @@
   }
   .advice.warn{ border-left-color:var(--red); background:#FBEAE7; }
   .advice.good{ border-left-color:var(--green); background:#EAF4EE; }
-  .note{ font-size:11.5px; color:var(--ink-soft); margin-top:10px; }
+  .note{ font-size:11.5px; color:var(--ink-soft); margin-top:10px; line-height:1.6; }
   .member-tag{
     display:inline-block;
     background:#EDE7D6;
@@ -224,6 +240,25 @@
     padding:1px 7px;
     font-size:12px;
     color:var(--green-deep);
+    white-space:nowrap;
+  }
+  .split-tag{
+    display:inline-block;
+    background:#EAF4EE;
+    color:var(--green-deep);
+    border-radius:4px;
+    padding:0 6px;
+    font-size:11.5px;
+    white-space:nowrap;
+  }
+  .pending-tag{
+    display:inline-block;
+    background:#FBF6E3;
+    color:var(--gold);
+    border-radius:4px;
+    padding:0 6px;
+    font-size:11.5px;
+    white-space:nowrap;
   }
   .settings-block{ margin-bottom:22px; }
   .chip-list{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
@@ -237,6 +272,23 @@
   .loading{ padding:60px 20px; text-align:center; color:var(--ink-soft); font-family:'Noto Serif TC',serif; }
   .empty{ color:var(--ink-soft); font-size:13px; padding:10px 0; }
   .backup-msg{ font-size:13px; color:var(--ink-soft); margin-top:8px; min-height:1.2em; }
+  [hidden]{ display:none !important; }
+  .dlg-overlay{
+    position:fixed; inset:0; z-index:50;
+    background:rgba(20,30,24,0.45);
+    display:flex; align-items:center; justify-content:center;
+    padding:20px;
+  }
+  .dlg-box{
+    background:var(--card);
+    border:1px solid var(--green-deep);
+    border-radius:10px;
+    padding:18px;
+    max-width:380px; width:100%;
+    box-shadow:0 8px 30px rgba(0,0,0,0.25);
+  }
+  .dlg-msg{ margin:0 0 16px; font-size:15px; line-height:1.7; }
+  .dlg-actions{ display:flex; gap:8px; justify-content:flex-end; }
 </style>
 </head>
 <body>
@@ -245,11 +297,13 @@
   <p>固定支出設定一次就好，每天只要記帳和看建議 — 資料自動儲存在這個瀏覽器，下個月還在</p>
 </header>
 <div id="warn" hidden></div>
+<div id="dialog" class="dlg-overlay" hidden></div>
 <nav id="tabs"></nav>
 <main><div class="panel" id="content"><div class="loading">讀取資料中…</div></div></main>
 
 <script>
 const STORAGE_KEY = 'budget-app-state-v1';
+const STATE_VERSION = 3;
 
 const DEFAULT_CATEGORIES = {
   "餐飲": ["早餐","午餐","晚餐","飲料","零食"],
@@ -264,7 +318,15 @@ const DEFAULT_CATEGORIES = {
   "狗狗": ["飼料","魚油","益生菌","骨頭保健","其他保健品","玩具"]
 };
 const INCOME_TYPES = ["基本月薪","加班費","獎金","投資收益","代墊款項","利息收入","其他"];
-const LIST_KEYS = ['fixedMonthly','annualItems','variableItems','dailyExpenses','incomes'];
+const LIST_KEYS = ['fixedItems','variableItems','dailyExpenses','incomes'];
+// 固定花費的繳費頻率 → 換算成每日成本的除數
+const FREQS = { month:{label:'每月', days:30}, week:{label:'每週', days:7}, year:{label:'每年', days:365} };
+
+// 晴的寶庫：分攤規則
+const TREASURE_MEMBER = '晴';
+const FOOD_CATEGORY = '餐飲';
+const FOOD_RATE = 0.35;
+const DEFAULT_RATE = 0.5;
 
 let state = null;
 let activeTab = 'overview';
@@ -284,10 +346,10 @@ function esc(s){
 
 function defaultState(){
   return {
+    version: STATE_VERSION,
     categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
-    members: ["Nimo"],
-    fixedMonthly: [],
-    annualItems: [],
+    members: ["Nimo", TREASURE_MEMBER],
+    fixedItems: [],
     variableItems: [],
     dailyExpenses: [],
     incomes: []
@@ -299,26 +361,89 @@ function setWarn(msg){
   if(msg){ w.textContent = msg; w.hidden = false; } else { w.hidden = true; }
 }
 
+// In-page dialogs. The browser's own confirm()/alert() are blocked in some viewers
+// (previews, in-app browsers) and would make a button silently do nothing.
+function closeDialog(){
+  const d = document.getElementById('dialog');
+  d.hidden = true;
+  d.innerHTML = '';
+}
+function askConfirm(message, yesLabel, onYes){
+  const d = document.getElementById('dialog');
+  d.innerHTML = `<div class="dlg-box" role="dialog" aria-modal="true">
+    <p class="dlg-msg">${esc(message).replace(/\n/g,'<br>')}</p>
+    <div class="dlg-actions">
+      <button class="btn secondary" id="dlg-no" type="button">取消</button>
+      <button class="btn" id="dlg-yes" type="button">${esc(yesLabel || '確定')}</button>
+    </div></div>`;
+  d.hidden = false;
+  document.getElementById('dlg-no').onclick = closeDialog;
+  document.getElementById('dlg-yes').onclick = ()=>{ closeDialog(); onYes(); };
+}
+function notice(message){
+  const d = document.getElementById('dialog');
+  d.innerHTML = `<div class="dlg-box" role="alertdialog" aria-modal="true">
+    <p class="dlg-msg">${esc(message).replace(/\n/g,'<br>')}</p>
+    <div class="dlg-actions"><button class="btn" id="dlg-yes" type="button">好</button></div></div>`;
+  d.hidden = false;
+  document.getElementById('dlg-yes').onclick = closeDialog;
+}
+
+// 舊版的「固定月費」「年度花費」轉成統一格式
+function legacyFixedToItems(list, freq){
+  return (Array.isArray(list) ? list : []).filter(r=>r && typeof r === 'object' && r.id != null).map(r=>({
+    id:String(r.id), category:String(r.category||''), item:String(r.item||''),
+    amount:Number(r.amount)||0, freq, note:r.note != null ? String(r.note) : ''
+  }));
+}
+// Older saves: convert them once.
+function migrateState(legacy){
+  if(state.version >= STATE_VERSION) return false;
+  if(state.version < 2){
+    state.dailyExpenses.forEach(r=>{
+      if(!Array.isArray(r.members)) r.members = r.member ? [String(r.member)] : [];
+      delete r.member;
+      if(r.note == null) r.note = '';
+    });
+    if(!state.members.includes(TREASURE_MEMBER)) state.members.push(TREASURE_MEMBER);
+  }
+  // v3: 固定月費 + 年度花費 → 固定花費（加上頻率與備註）
+  if(legacy){
+    const have = new Set(state.fixedItems.map(r=>r.id));
+    legacyFixedToItems(legacy.fixedMonthly, 'month').concat(legacyFixedToItems(legacy.annualItems, 'year')).forEach(r=>{
+      if(!have.has(r.id)){ state.fixedItems.push(r); have.add(r.id); }
+    });
+  }
+  state.fixedItems.forEach(r=>{ if(!FREQS[r.freq]) r.freq = 'month'; if(r.note == null) r.note = ''; });
+  state.version = STATE_VERSION;
+  return true;
+}
+
 function loadState(){
   let raw = null;
   try{ raw = localStorage.getItem(STORAGE_KEY); }
   catch(e){ setWarn('這個瀏覽器不允許儲存網站資料（可能是無痕模式），記的帳無法保留。請改用一般瀏覽模式。'); }
   state = defaultState();
+  let legacy = null;
   if(raw){
     try{
       const parsed = JSON.parse(raw);
       if(parsed && typeof parsed === 'object'){
         const d = defaultState();
         for(const k in d){
+          if(k === 'version') continue;
           const ok = LIST_KEYS.includes(k) || k === 'members' ? Array.isArray(parsed[k]) : (parsed[k] && typeof parsed[k] === 'object');
           state[k] = ok ? parsed[k] : d[k];
         }
+        state.version = Number(parsed.version) || 1;
+        legacy = { fixedMonthly: parsed.fixedMonthly, annualItems: parsed.annualItems };
       }
     } catch(e){
       console.error('load failed', e);
       try{ localStorage.setItem(STORAGE_KEY + '-corrupt', raw); } catch(_){}
     }
   }
+  if(migrateState(legacy)) saveState();
 }
 
 // Saves immediately on every change, so closing the page cannot lose anything.
@@ -347,15 +472,45 @@ function memberOptions(selected){
 function memberOptionsBlank(selected){
   return `<option value="">（不指定）</option>` + memberOptions(selected);
 }
+function memberChecks(){
+  if(!state.members.length) return '<span class="empty">請先到「設定」新增成員</span>';
+  return state.members.map(m =>
+    `<label class="chk"><input type="checkbox" name="new-members" value="${esc(m)}">${esc(m)}</label>`).join('');
+}
+function memberTags(list){
+  const ms = Array.isArray(list) ? list : [];
+  return ms.length ? ms.map(m=>`<span class="member-tag">${esc(m)}</span>`).join(' ') : '—';
+}
+
+// ---------- 晴的寶庫：分攤計算 ----------
+// A note that contains "1/n" anywhere (1/2, 1/3, 1/4 ...) means amount ÷ n and overrides the usual rate.
+// Only a numerator of 1 counts, and the 1 must not be part of a longer number or date ("10/27", "2026/1/3").
+function parseFraction(note){
+  const m = String(note == null ? '' : note).match(/(?:^|[^\d\/／])1\s*[\/／]\s*(\d+)(?![\d\/／])/);
+  if(!m) return null;
+  const n = Number(m[1]);
+  if(!(n >= 1)) return null;
+  return { n };
+}
+function calcShare(r){
+  const amt = Number(r.amount) || 0;
+  const f = parseFraction(r.note);
+  if(f) return { value: amt / f.n, rule: '備註 1/' + f.n };
+  if(r.category === FOOD_CATEGORY) return { value: amt * FOOD_RATE, rule: '餐飲 ×' + FOOD_RATE };
+  return { value: amt * DEFAULT_RATE, rule: '一般 ×' + DEFAULT_RATE };
+}
+function isTreasureRow(r){
+  return Array.isArray(r.members) && r.members.includes(TREASURE_MEMBER);
+}
 
 // ---------- Tab definitions ----------
 const TABS = [
   {id:'overview', label:'總覽與建議'},
-  {id:'fixed', label:'固定月費'},
-  {id:'annual', label:'年度花費'},
+  {id:'fixed', label:'固定花費'},
   {id:'variable', label:'彈性消耗品'},
   {id:'daily', label:'每日花費'},
   {id:'income', label:'收入'},
+  {id:'treasure', label:'晴的寶庫'},
   {id:'settings', label:'設定'},
 ];
 
@@ -369,30 +524,36 @@ function renderTabs(){
   });
 }
 
-// ---------- Generic simple cost tables (固定月費 / 年度花費 share the same shape) ----------
-function renderSimpleCostTab(key, opts){
-  const rows = state[key];
-  const total = rows.reduce((s,r)=>s+Number(r.amount||0),0);
-  const totalDaily = total/opts.divisor;
-  let html = `<h2>${opts.title}</h2><p class="hint">${opts.hint}</p>`;
-  html += `<table><thead><tr><th>類別</th><th>項目</th><th class="num">${opts.amountLabel}</th><th class="num">每日成本</th><th></th></tr></thead><tbody>`;
+// ---------- 固定花費（每月 / 每週 / 每年） ----------
+function fixedDailyOf(r){
+  const f = FREQS[r.freq] || FREQS.month;
+  return Number(r.amount||0) / f.days;
+}
+function renderFixedTab(){
+  const rows = state.fixedItems;
+  const totalDaily = rows.reduce((s,r)=>s+fixedDailyOf(r),0);
+  let html = `<h2>固定花費</h2><p class="hint">填固定要付的費用（房租、訂閱、保險、牌照稅等），選擇頻率後自動換算成每日成本（每月 ÷ 30、每週 ÷ 7、每年 ÷ 365）。</p>`;
+  html += `<table><thead><tr><th>類別</th><th>項目</th><th>頻率</th><th class="num">金額</th><th class="num">每日成本</th><th>備註</th><th></th></tr></thead><tbody>`;
   if(rows.length===0){
-    html += `<tr><td colspan="5" class="empty">尚無資料，請在下方新增</td></tr>`;
+    html += `<tr><td colspan="7" class="empty">尚無資料，請在下方新增</td></tr>`;
   }
   rows.forEach(r=>{
-    const daily = Number(r.amount||0)/opts.divisor;
     html += `<tr>
-      <td>${esc(r.category)}</td><td>${esc(r.item)}</td>
-      <td class="num">${money(r.amount)}</td><td class="num">${moneyF(daily)}</td>
+      <td>${esc(r.category)}</td><td>${esc(r.item)}</td><td>${esc((FREQS[r.freq]||FREQS.month).label)}</td>
+      <td class="num">${money(r.amount)}</td><td class="num">${moneyF(fixedDailyOf(r))}</td>
+      <td>${esc(r.note||'')}</td>
       <td><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
     </tr>`;
   });
-  html += `<tr class="total-row"><td colspan="2">加總</td><td class="num">${money(total)}</td><td class="num">${moneyF(totalDaily)}</td><td></td></tr>`;
+  html += `<tr class="total-row"><td colspan="4">加總</td><td class="num">${moneyF(totalDaily)}</td><td></td><td></td></tr>`;
   html += `</tbody></table>`;
   html += `<div class="add-row">
     <div class="field"><label>類別</label><select id="new-cat">${catOptions()}</select></div>
     <div class="field"><label>項目</label><select id="new-item">${itemOptions(Object.keys(state.categories)[0])}</select></div>
-    <div class="field"><label>${opts.amountLabel}</label><input type="number" id="new-amount" min="0" inputmode="decimal" placeholder="0"></div>
+    <div class="field"><label>頻率</label><div class="chk-list">${Object.keys(FREQS).map((k,i)=>
+      `<label class="chk"><input type="radio" name="new-freq" value="${k}"${i===0?' checked':''}> ${FREQS[k].label}</label>`).join('')}</div></div>
+    <div class="field"><label>金額</label><input type="number" id="new-amount" min="0" inputmode="decimal" placeholder="0"></div>
+    <div class="field wide"><label>備註</label><input type="text" id="new-note" placeholder="選填"></div>
     <button class="btn" id="new-add">新增</button>
   </div>`;
   document.getElementById('content').innerHTML = html;
@@ -404,14 +565,17 @@ function renderSimpleCostTab(key, opts){
     const cat = document.getElementById('new-cat').value;
     const item = document.getElementById('new-item').value;
     const amount = Number(document.getElementById('new-amount').value);
-    if(!amount){ alert('請填寫金額'); return; }
-    state[key].push({id:uid(), category:cat, item, amount});
+    const picked = document.querySelector('input[name="new-freq"]:checked');
+    const freq = picked && FREQS[picked.value] ? picked.value : 'month';
+    const note = document.getElementById('new-note').value.trim();
+    if(!amount){ notice('請填寫金額'); return; }
+    state.fixedItems.push({id:uid(), category:cat, item, amount, freq, note});
     saveState();
     render();
   };
   document.querySelectorAll('[data-del]').forEach(b=>{
     b.onclick = ()=>{
-      state[key] = state[key].filter(r=>r.id!==b.dataset.del);
+      state.fixedItems = state.fixedItems.filter(r=>r.id!==b.dataset.del);
       saveState();
       render();
     };
@@ -424,9 +588,9 @@ function renderVariableTab(){
   let knownTotal = 0;
   let html = `<h2>彈性消耗品</h2>
   <p class="hint">用量不確定的東西：先填購買日期與金額；等下次真的再買、東西用完時，回來填「下次購買日期」，就會自動算出這段期間的每日成本。</p>`;
-  html += `<table><thead><tr><th>類別</th><th>品項</th><th>購買日期</th><th class="num">金額</th><th>下次購買日期</th><th class="num">每日成本</th><th></th></tr></thead><tbody>`;
+  html += `<table><thead><tr><th>類別</th><th>品項</th><th>購買日期</th><th class="num">金額</th><th>下次購買日期</th><th class="num">每日成本</th><th>備註</th><th></th></tr></thead><tbody>`;
   if(rows.length===0){
-    html += `<tr><td colspan="7" class="empty">尚無資料，請在下方新增</td></tr>`;
+    html += `<tr><td colspan="8" class="empty">尚無資料，請在下方新增</td></tr>`;
   }
   rows.forEach(r=>{
     let dailyText = '待下次購買後計算';
@@ -443,16 +607,18 @@ function renderVariableTab(){
         <input type="date" value="${esc(r.nextBuyDate||'')}" data-next="${esc(r.id)}" style="width:150px">
       </td>
       <td class="num">${dailyText}</td>
+      <td>${esc(r.note||'')}</td>
       <td><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
     </tr>`;
   });
-  html += `<tr class="total-row"><td colspan="5">加總（已知每日成本）</td><td class="num">${moneyF(knownTotal)}</td><td></td></tr>`;
+  html += `<tr class="total-row"><td colspan="5">加總（已知每日成本）</td><td class="num">${moneyF(knownTotal)}</td><td></td><td></td></tr>`;
   html += `</tbody></table>`;
   html += `<div class="add-row">
     <div class="field"><label>類別</label><select id="new-cat">${catOptions()}</select></div>
     <div class="field"><label>品項</label><select id="new-item">${itemOptions(Object.keys(state.categories)[0])}</select></div>
     <div class="field"><label>購買日期</label><input type="date" id="new-buydate" value="${todayStr()}"></div>
     <div class="field"><label>金額</label><input type="number" id="new-amount" min="0" inputmode="decimal" placeholder="0"></div>
+    <div class="field wide"><label>備註</label><input type="text" id="new-note" placeholder="選填"></div>
     <button class="btn" id="new-add">新增</button>
   </div>`;
   document.getElementById('content').innerHTML = html;
@@ -463,10 +629,11 @@ function renderVariableTab(){
   document.getElementById('new-add').onclick = ()=>{
     const cat = document.getElementById('new-cat').value;
     const item = document.getElementById('new-item').value;
+    const note = document.getElementById('new-note').value.trim();
     const buyDate = document.getElementById('new-buydate').value;
     const amount = Number(document.getElementById('new-amount').value);
-    if(!amount || !buyDate){ alert('請填寫購買日期與金額'); return; }
-    state.variableItems.push({id:uid(), category:cat, item, buyDate, amount, nextBuyDate:''});
+    if(!amount || !buyDate){ notice('請填寫購買日期與金額'); return; }
+    state.variableItems.push({id:uid(), category:cat, item, buyDate, amount, nextBuyDate:'', note});
     saveState();
     render();
   };
@@ -492,28 +659,30 @@ function renderVariableTab(){
 function renderDailyTab(){
   const rows = [...state.dailyExpenses].sort((a,b)=> String(b.date).localeCompare(String(a.date)));
   const total = rows.reduce((s,r)=>s+Number(r.amount||0),0);
-  let html = `<h2>每日花費</h2><p class="hint">記錄每天實際花費，可指定使用成員。</p>`;
-  html += `<table><thead><tr><th>日期</th><th>成員</th><th>類別</th><th>項目</th><th class="num">金額</th><th></th></tr></thead><tbody>`;
+  let html = `<h2>每日花費</h2><p class="hint">記錄每天實際花費，成員可以複選，也可以寫備註。</p>`;
+  html += `<table><thead><tr><th>日期</th><th>成員</th><th>類別</th><th>項目</th><th>備註</th><th class="num">金額</th><th></th></tr></thead><tbody>`;
   if(rows.length===0){
-    html += `<tr><td colspan="6" class="empty">尚無資料，請在下方新增</td></tr>`;
+    html += `<tr><td colspan="7" class="empty">尚無資料，請在下方新增</td></tr>`;
   }
   rows.forEach(r=>{
     html += `<tr>
       <td>${esc(r.date)}</td>
-      <td>${r.member?`<span class="member-tag">${esc(r.member)}</span>`:'—'}</td>
+      <td>${memberTags(r.members)}</td>
       <td>${esc(r.category)}</td><td>${esc(r.item)}</td>
+      <td>${esc(r.note||'')}${r.splitDate?` <span class="split-tag">已分攤 ${esc(r.splitDate)}</span>`:''}</td>
       <td class="num">${money(r.amount)}</td>
       <td><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
     </tr>`;
   });
-  html += `<tr class="total-row"><td colspan="4">加總</td><td class="num">${money(total)}</td><td></td></tr>`;
+  html += `<tr class="total-row"><td colspan="5">加總</td><td class="num">${money(total)}</td><td></td></tr>`;
   html += `</tbody></table>`;
   html += `<div class="add-row">
     <div class="field"><label>日期</label><input type="date" id="new-date" value="${todayStr()}"></div>
-    <div class="field"><label>成員</label><select id="new-member">${memberOptionsBlank()}</select></div>
     <div class="field"><label>類別</label><select id="new-cat">${catOptions()}</select></div>
     <div class="field"><label>項目</label><select id="new-item">${itemOptions(Object.keys(state.categories)[0])}</select></div>
     <div class="field"><label>金額</label><input type="number" id="new-amount" min="0" inputmode="decimal" placeholder="0"></div>
+    <div class="field wide"><label>成員（可複選）</label><div class="chk-list">${memberChecks()}</div></div>
+    <div class="field wide"><label>備註（選填，例如：1/3）</label><input type="text" id="new-note" placeholder="例如：和朋友聚餐，寫 1/3 就是金額除以 3"></div>
     <button class="btn" id="new-add">新增</button>
   </div>`;
   document.getElementById('content').innerHTML = html;
@@ -523,20 +692,30 @@ function renderDailyTab(){
   };
   document.getElementById('new-add').onclick = ()=>{
     const date = document.getElementById('new-date').value;
-    const member = document.getElementById('new-member').value;
+    const members = Array.from(document.querySelectorAll('input[name="new-members"]:checked')).map(x=>x.value);
     const cat = document.getElementById('new-cat').value;
     const item = document.getElementById('new-item').value;
+    const note = document.getElementById('new-note').value.trim();
     const amount = Number(document.getElementById('new-amount').value);
-    if(!amount || !date){ alert('請填寫日期與金額'); return; }
-    state.dailyExpenses.push({id:uid(), date, member, category:cat, item, amount});
+    if(!amount || !date){ notice('請填寫日期與金額'); return; }
+    state.dailyExpenses.push({id:uid(), date, members, category:cat, item, note, amount});
     saveState();
     render();
   };
   document.querySelectorAll('[data-del]').forEach(b=>{
     b.onclick = ()=>{
-      state.dailyExpenses = state.dailyExpenses.filter(r=>r.id!==b.dataset.del);
-      saveState();
-      render();
+      const id = b.dataset.del;
+      const r = state.dailyExpenses.find(x=>x.id===id);
+      const remove = ()=>{
+        state.dailyExpenses = state.dailyExpenses.filter(x=>x.id!==id);
+        saveState();
+        render();
+      };
+      if(r && r.splitDate){
+        askConfirm('這筆已經分攤給晴了，刪除後「晴的寶庫」的累計金額會減少。確定要刪除嗎？', '刪除', remove);
+        return;
+      }
+      remove();
     };
   });
 }
@@ -577,7 +756,7 @@ function renderIncomeTab(){
     const type = document.getElementById('new-type').value;
     const note = document.getElementById('new-note').value;
     const amount = Number(document.getElementById('new-amount').value);
-    if(!amount || !date){ alert('請填寫日期與金額'); return; }
+    if(!amount || !date){ notice('請填寫日期與金額'); return; }
     state.incomes.push({id:uid(), date, member, type, note, amount});
     saveState();
     render();
@@ -591,13 +770,306 @@ function renderIncomeTab(){
   });
 }
 
+// ---------- 晴的寶庫 ----------
+function renderTreasureTab(){
+  const rows = state.dailyExpenses.filter(isTreasureRow);
+  const byDateDesc = (a,b)=> String(b.date).localeCompare(String(a.date));
+  const pending = rows.filter(r=>!r.splitDate).sort(byDateDesc);
+  const settled = rows.filter(r=>r.splitDate).sort(byDateDesc);
+  const pendingTotal = pending.reduce((s,r)=>s+calcShare(r).value,0);
+  const settledTotal = settled.reduce((s,r)=>s+Number(r.splitAmount||0),0);
+
+  let html = `<h2>晴的寶庫</h2>
+  <p class="hint">這裡只列出「每日花費」裡成員有勾選「${esc(TREASURE_MEMBER)}」的交易。按下「分攤」，會把還沒分攤的交易一次算好，並記下按下的日期；已經分攤過的交易，下次不會重複計算。</p>`;
+
+  html += `<div class="grid2">
+    <div class="stat"><div class="label">累計已分攤（晴要給 Nimo）</div><div class="value">${moneyF(settledTotal)}</div></div>
+    <div class="stat"><div class="label">尚未分攤（預估，${pending.length} 筆）</div><div class="value">${moneyF(pendingTotal)}</div></div>
+  </div>`;
+
+  html += `<div class="add-row" style="margin-top:16px;border-top:none;padding-top:0;">
+    <button class="btn" id="split-btn" ${pending.length?'':'disabled'}>分攤${pending.length?`（${pending.length} 筆，${moneyF(pendingTotal)}）`:''}</button>
+    <button class="btn secondary" id="export-xlsx-btn" ${settled.length?'':'disabled'}>匯出 Excel（已分攤）</button>
+  </div>
+  <div class="backup-msg" id="treasure-msg"></div>
+  <p class="note">計算方式：餐飲 ×${FOOD_RATE}；其他類別 ×${DEFAULT_RATE}；備註開頭寫 1/2、1/3、1/4…時，改用金額 ÷ 該數字（1/3 就是金額 ÷ 3）。</p>`;
+
+  html += `<h2 style="margin-top:22px;">晴的交易</h2>`;
+  html += `<table><thead><tr><th>日期</th><th>成員</th><th>類別／項目</th><th>備註</th><th class="num">金額</th><th>規則</th><th class="num">晴要給</th><th>狀態</th></tr></thead><tbody>`;
+  if(rows.length===0){
+    html += `<tr><td colspan="8" class="empty">還沒有包含「${esc(TREASURE_MEMBER)}」的花費，到「每日花費」新增時勾選她就會出現在這裡</td></tr>`;
+  }
+  pending.concat(settled).forEach(r=>{
+    const isSettled = !!r.splitDate;
+    const s = isSettled ? { value: Number(r.splitAmount||0), rule: r.splitRule || '' } : calcShare(r);
+    html += `<tr>
+      <td>${esc(r.date)}</td>
+      <td>${memberTags(r.members)}</td>
+      <td>${esc(r.category)}／${esc(r.item)}</td>
+      <td>${esc(r.note||'')}</td>
+      <td class="num">${money(r.amount)}</td>
+      <td>${esc(s.rule)}</td>
+      <td class="num">${moneyF(s.value)}</td>
+      <td>${isSettled ? `<span class="split-tag">已分攤 ${esc(r.splitDate)}</span>` : '<span class="pending-tag">未分攤</span>'}</td>
+    </tr>`;
+  });
+  html += `</tbody></table>`;
+
+  // history: one line per day the 分攤 button was pressed
+  const batches = {};
+  settled.forEach(r=>{
+    const b = batches[r.splitDate] || (batches[r.splitDate] = { count:0, sum:0 });
+    b.count++; b.sum += Number(r.splitAmount||0);
+  });
+  const dates = Object.keys(batches).sort().reverse();
+  html += `<h2 style="margin-top:10px;">分攤紀錄</h2>`;
+  if(!dates.length){
+    html += `<p class="empty">還沒有分攤過</p>`;
+  } else {
+    html += `<table><thead><tr><th>分攤日期</th><th class="num">筆數</th><th class="num">晴要給</th><th></th></tr></thead><tbody>`;
+    dates.forEach(d=>{
+      html += `<tr><td>${esc(d)}</td><td class="num">${batches[d].count}</td><td class="num">${moneyF(batches[d].sum)}</td>
+        <td style="white-space:nowrap;"><button class="btn secondary small" data-export-date="${esc(d)}">匯出 Excel</button> <button class="del-btn" data-undo="${esc(d)}">取消這天的分攤</button></td></tr>`;
+    });
+    html += `<tr class="total-row"><td>合計</td><td class="num">${settled.length}</td><td class="num">${moneyF(settledTotal)}</td><td></td></tr>`;
+    html += `</tbody></table>`;
+  }
+
+  document.getElementById('content').innerHTML = html;
+
+  document.getElementById('split-btn').onclick = ()=>{
+    const todo = state.dailyExpenses.filter(r=>isTreasureRow(r) && !r.splitDate);
+    if(!todo.length) return;
+    const preview = todo.reduce((s,r)=>s+calcShare(r).value,0);
+    askConfirm('要分攤 ' + todo.length + ' 筆，晴要給 Nimo 共 ' + moneyF(preview) + ' 嗎？\n分攤後這些交易不會再重複計算。', '分攤', ()=>{
+      const today = todayStr();
+      todo.forEach(r=>{
+        const s = calcShare(r);
+        r.splitDate = today;
+        r.splitAmount = s.value;
+        r.splitRule = s.rule;
+      });
+      saveState();
+      render();
+    });
+  };
+  document.getElementById('export-xlsx-btn').onclick = ()=> exportTreasureExcel(null);
+  document.querySelectorAll('[data-export-date]').forEach(b=>{
+    b.onclick = ()=> exportTreasureExcel(b.dataset.exportDate);
+  });
+  document.querySelectorAll('[data-undo]').forEach(b=>{
+    b.onclick = ()=>{
+      const d = b.dataset.undo;
+      askConfirm('要取消 ' + d + ' 這天的分攤嗎？這些交易會變回「未分攤」。', '取消分攤', ()=>{
+        state.dailyExpenses.forEach(r=>{
+          if(r.splitDate === d){ delete r.splitDate; delete r.splitAmount; delete r.splitRule; }
+        });
+        saveState();
+        render();
+      });
+    };
+  });
+}
+
+// ---------- 存檔／分享：手機優先開分享選單，電腦直接下載 ----------
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  return 'downloaded';
+}
+function deliverFile(blob, filename){
+  const ua = (navigator && navigator.userAgent) || '';
+  const touch = /iPhone|iPad|iPod|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  try{
+    if(touch && typeof File === 'function' && navigator.canShare && navigator.share){
+      const file = new File([blob], filename, { type: blob.type });
+      if(navigator.canShare({ files: [file] })){
+        return navigator.share({ files: [file], title: filename })
+          .then(()=>'shared')
+          .catch(e=> (e && e.name === 'AbortError') ? 'cancelled' : downloadBlob(blob, filename));
+      }
+    }
+  } catch(e){}
+  return Promise.resolve(downloadBlob(blob, filename));
+}
+
+// ---------- 匯出 Excel（.xlsx，自己打包，不需要外部程式庫） ----------
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const CRC_TABLE = (()=>{
+  const t = new Uint32Array(256);
+  for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); t[n] = c>>>0; }
+  return t;
+})();
+function crc32(bytes){
+  let c = 0xFFFFFFFF;
+  for(let i=0;i<bytes.length;i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c>>>8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+// A zip with the files stored as they are (no compression), which is all .xlsx needs.
+function buildZip(files){
+  const enc = new TextEncoder();
+  const now = new Date();
+  const dosTime = (now.getHours()<<11) | (now.getMinutes()<<5) | (now.getSeconds()>>1);
+  const dosDate = ((now.getFullYear()-1980)<<9) | ((now.getMonth()+1)<<5) | now.getDate();
+  const chunks = [], central = [];
+  let offset = 0;
+  files.forEach(f=>{
+    const name = enc.encode(f.name);
+    const crc = crc32(f.data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint16(6,0x0800,true); lh.setUint16(8,0,true);
+    lh.setUint16(10,dosTime,true); lh.setUint16(12,dosDate,true); lh.setUint32(14,crc,true);
+    lh.setUint32(18,f.data.length,true); lh.setUint32(22,f.data.length,true);
+    lh.setUint16(26,name.length,true); lh.setUint16(28,0,true);
+    chunks.push(new Uint8Array(lh.buffer), name, f.data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true); ch.setUint16(4,20,true); ch.setUint16(6,20,true); ch.setUint16(8,0x0800,true); ch.setUint16(10,0,true);
+    ch.setUint16(12,dosTime,true); ch.setUint16(14,dosDate,true); ch.setUint32(16,crc,true);
+    ch.setUint32(20,f.data.length,true); ch.setUint32(24,f.data.length,true);
+    ch.setUint16(28,name.length,true); ch.setUint32(42,offset,true);
+    central.push(new Uint8Array(ch.buffer), name);
+    offset += 30 + name.length + f.data.length;
+  });
+  let cdSize = 0;
+  central.forEach(c=>{ cdSize += c.length; });
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0,0x06054b50,true); end.setUint16(8,files.length,true); end.setUint16(10,files.length,true);
+  end.setUint32(12,cdSize,true); end.setUint32(16,offset,true);
+  const all = chunks.concat(central, [new Uint8Array(end.buffer)]);
+  let total = 0;
+  all.forEach(c=>{ total += c.length; });
+  const out = new Uint8Array(total);
+  let p = 0;
+  all.forEach(c=>{ out.set(c,p); p += c.length; });
+  return out;
+}
+
+function xmlText(s){ return esc(s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,''); }
+function cStr(ref, text, style){
+  return `<c r="${ref}"${style?` s="${style}"`:''} t="inlineStr"><is><t xml:space="preserve">${xmlText(text)}</t></is></c>`;
+}
+// A number cell; with a formula it also carries the calculated value, so apps that do not recalculate still show it.
+function cNum(ref, v, style, formula){
+  return `<c r="${ref}"${style?` s="${style}"`:''}>${formula?`<f>${xmlText(formula)}</f>`:''}<v>${Number.isFinite(v)?v:0}</v></c>`;
+}
+
+// The factor a row was settled with, read back from the rule saved at 分攤 time.
+function coefOf(r){
+  const rule = String(r.splitRule || '');
+  let m = rule.match(/^備註 1\/(\d+)$/);
+  if(m) return { value: 1/Number(m[1]), formula: '1/' + m[1] };
+  m = rule.match(/×\s*([0-9.]+)$/);
+  if(m) return { value: Number(m[1]), formula: null };
+  const amt = Number(r.amount) || 0;
+  return { value: amt ? Number(r.splitAmount||0)/amt : 0, formula: null };
+}
+
+function buildTreasureXlsx(rows){
+  const enc = new TextEncoder();
+  const heads = ['分攤日期','花費日期','成員','類別','項目','備註','金額','計算規則','係數','晴要給 Nimo'];
+  const cols = 'ABCDEFGHIJ';
+  let data = `<row r="1">${heads.map((h,i)=>cStr(cols[i]+'1', h, 1)).join('')}</row>`;
+  let sumAmt = 0, sumShare = 0;
+  rows.forEach((r,idx)=>{
+    const n = idx + 2;
+    const c = coefOf(r);
+    const amt = Number(r.amount) || 0;
+    const share = Number(r.splitAmount) || 0;
+    sumAmt += amt; sumShare += share;
+    data += `<row r="${n}">` +
+      cStr('A'+n, r.splitDate) + cStr('B'+n, r.date) + cStr('C'+n, (r.members||[]).join('、')) +
+      cStr('D'+n, r.category) + cStr('E'+n, r.item) + cStr('F'+n, r.note || '') +
+      cNum('G'+n, amt, 2) + cStr('H'+n, r.splitRule || '') +
+      cNum('I'+n, c.value, 3, c.formula) +
+      cNum('J'+n, share, 2, 'G'+n+'*I'+n) + `</row>`;
+  });
+  const last = rows.length + 1, tot = last + 1;
+  data += `<row r="${tot}">` + cStr('A'+tot, '分攤總金額（晴要給 Nimo）', 4) +
+    cNum('G'+tot, sumAmt, 5, `SUM(G2:G${last})`) + cNum('J'+tot, sumShare, 5, `SUM(J2:J${last})`) + `</row>`;
+  data += `<row r="${tot+2}">` + cStr('A'+(tot+2), `計算規則：餐飲 ×${FOOD_RATE}；其他類別 ×${DEFAULT_RATE}；備註開頭寫 1/n 時，金額 ÷ n。「晴要給 Nimo」＝ 金額 × 係數，修改金額或係數，總金額會自動重算。`) + `</row>`;
+
+  const widths = [12,12,12,10,12,24,12,14,9,16];
+  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+    `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` +
+    `<cols>${widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols>` +
+    `<sheetData>${data}</sheetData></worksheet>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+    `<numFmts count="2"><numFmt numFmtId="164" formatCode="#,##0.0"/><numFmt numFmtId="165" formatCode="0.0###"/></numFmts>` +
+    `<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>` +
+    `<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FFEDE7D6"/><bgColor indexed="64"/></patternFill></fill></fills>` +
+    `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>` +
+    `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
+    `<cellXfs count="6">` +
+    `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
+    `<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>` +
+    `<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
+    `<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
+    `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
+    `<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/>` +
+    `</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  const head = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`;
+  const files = [
+    { name:'[Content_Types].xml', data: enc.encode(head +
+      `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+      `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+      `<Default Extension="xml" ContentType="application/xml"/>` +
+      `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
+      `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>` +
+      `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`) },
+    { name:'_rels/.rels', data: enc.encode(head +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`) },
+    { name:'xl/workbook.xml', data: enc.encode(head +
+      `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+      `<sheets><sheet name="晴的分攤" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`) },
+    { name:'xl/_rels/workbook.xml.rels', data: enc.encode(head +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>` +
+      `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`) },
+    { name:'xl/worksheets/sheet1.xml', data: enc.encode(sheet) },
+    { name:'xl/styles.xml', data: enc.encode(styles) },
+  ];
+  return buildZip(files);
+}
+
+function setTreasureMsg(t){
+  const el = document.getElementById('treasure-msg');
+  if(el) el.textContent = t;
+}
+
+// date = one 分攤 day, or null for everything that has been settled
+function exportTreasureExcel(date){
+  const rows = state.dailyExpenses
+    .filter(r=>isTreasureRow(r) && r.splitDate && (!date || r.splitDate === date))
+    .sort((a,b)=> String(a.splitDate).localeCompare(String(b.splitDate)) || String(a.date).localeCompare(String(b.date)));
+  if(!rows.length){ setTreasureMsg('還沒有已分攤的交易可以匯出'); return; }
+  const total = rows.reduce((s,r)=>s+(Number(r.splitAmount)||0),0);
+  const blob = new Blob([buildTreasureXlsx(rows)], { type: XLSX_MIME });
+  const name = '晴的分攤-' + (date || todayStr()) + '.xlsx';
+  const summary = rows.length + ' 筆，分攤總金額 ' + moneyF(total);
+  deliverFile(blob, name).then(res=>{
+    if(res === 'cancelled') return;
+    setTreasureMsg(res === 'shared'
+      ? '已開啟分享選單，請選「儲存到檔案」或傳給自己（' + summary + '）'
+      : '已匯出 Excel（' + summary + '）');
+  });
+}
+
 // ---------- 總覽與建議 ----------
 let overviewMonth = thisMonthStr();
 function renderOverviewTab(){
   const dim = daysInMonth(overviewMonth);
 
-  const fixedDaily = state.fixedMonthly.reduce((s,r)=>s+Number(r.amount||0),0)/30;
-  const annualDaily = state.annualItems.reduce((s,r)=>s+Number(r.amount||0),0)/365;
+  const fixedDaily = state.fixedItems.reduce((s,r)=>s+fixedDailyOf(r),0);
   const variableDaily = state.variableItems.reduce((s,r)=>{
     if(r.nextBuyDate){
       const days = (new Date(r.nextBuyDate) - new Date(r.buyDate)) / 86400000;
@@ -609,7 +1081,7 @@ function renderOverviewTab(){
   const monthDaily = state.dailyExpenses.filter(r=>String(r.date).startsWith(overviewMonth));
   const monthDailyTotal = monthDaily.reduce((s,r)=>s+Number(r.amount||0),0);
 
-  const recurringDailyTotal = fixedDaily+annualDaily+variableDaily;
+  const recurringDailyTotal = fixedDaily+variableDaily;
   const monthExpenseEstimate = recurringDailyTotal*dim + monthDailyTotal;
 
   const monthIncomes = state.incomes.filter(r=>String(r.date).startsWith(overviewMonth));
@@ -622,21 +1094,22 @@ function renderOverviewTab(){
   const incomeByType = {};
   monthIncomes.forEach(r=>{ incomeByType[r.type] = (incomeByType[r.type]||0) + Number(r.amount); });
 
-  // member breakdown for daily expenses
+  // member breakdown for daily expenses: a shared expense is split equally between its members
   const memberSpend = {};
   monthDaily.forEach(r=>{
-    const m = r.member || '未指定';
-    memberSpend[m] = (memberSpend[m]||0) + Number(r.amount);
+    const ms = Array.isArray(r.members) && r.members.length ? r.members : ['未指定'];
+    const share = Number(r.amount||0) / ms.length;
+    ms.forEach(m=>{ memberSpend[m] = (memberSpend[m]||0) + share; });
   });
 
   let html = `<h2>總覽與建議</h2>
-  <p class="hint">固定月費、年度花費、彈性消耗品只要設定一次，之後每個月都會自動套用；每日花費和收入依你選的月份自動彙整。</p>
+  <p class="hint">固定花費、彈性消耗品只要設定一次，之後每個月都會自動套用；每日花費和收入依你選的月份自動彙整。</p>
   <div class="field" style="margin-bottom:16px;"><label>檢視月份</label><input type="month" id="month-pick" value="${overviewMonth}"></div>`;
 
   html += `<div class="grid2">
     <div class="stat"><div class="label">${overviewMonth} 收入合計</div><div class="value">${money(monthIncomeTotal)}</div></div>
     <div class="stat"><div class="label">${overviewMonth} 支出估計</div><div class="value">${money(monthExpenseEstimate)}</div></div>
-    <div class="stat"><div class="label">固定＋年度＋消耗品（每日）</div><div class="value">${moneyF(recurringDailyTotal)}</div></div>
+    <div class="stat"><div class="label">固定花費＋消耗品（每日）</div><div class="value">${moneyF(recurringDailyTotal)}</div></div>
     <div class="stat"><div class="label">當月已記錄花費</div><div class="value">${money(monthDailyTotal)}</div></div>
   </div>`;
 
@@ -669,7 +1142,8 @@ function renderOverviewTab(){
   }
 
   // member breakdown
-  html += `<h2 style="margin-top:10px;">每日花費（依成員）</h2>`;
+  html += `<h2 style="margin-top:10px;">每日花費（依成員）</h2>
+  <p class="hint" style="margin-bottom:8px;">一筆花費勾了多位成員時，金額平均分給每個人。</p>`;
   if(Object.keys(memberSpend).length===0){
     html += `<p class="empty">這個月尚無每日花費紀錄</p>`;
   } else {
@@ -691,27 +1165,49 @@ function renderOverviewTab(){
 // ---------- 備份：匯出與匯入 ----------
 function cleanRecord(r){
   const out = { id: String(r.id) };
-  ['category','item','date','member','type','note','buyDate','nextBuyDate'].forEach(k=>{
+  ['category','item','date','member','type','note','buyDate','nextBuyDate','freq'].forEach(k=>{
     if(r[k] != null) out[k] = String(r[k]);
   });
   out.amount = Number(r.amount) || 0;
+  return out;
+}
+// Daily expenses carry a members list, a note and the split result.
+function cleanDaily(r){
+  const out = cleanRecord(r);
+  delete out.member;
+  const list = Array.isArray(r.members) ? r.members : (r.member ? [r.member] : []);
+  out.members = list.filter(m=>typeof m === 'string' && m);
+  out.note = r.note != null ? String(r.note) : '';
+  if(r.splitDate){
+    out.splitDate = String(r.splitDate);
+    out.splitAmount = Number(r.splitAmount) || 0;
+    out.splitRule = r.splitRule != null ? String(r.splitRule) : '';
+  }
   return out;
 }
 
 // Imported records are added; anything already here is kept. Nothing is overwritten or deleted.
 function mergeImported(data){
   let added = 0;
+  // 舊版備份：固定月費 / 年度花費 → 固定花費
+  if(data && (Array.isArray(data.fixedMonthly) || Array.isArray(data.annualItems))){
+    const have = new Set(state.fixedItems.map(r=>r.id));
+    legacyFixedToItems(data.fixedMonthly,'month').concat(legacyFixedToItems(data.annualItems,'year')).forEach(r=>{
+      if(!have.has(r.id)){ state.fixedItems.push(r); have.add(r.id); added++; }
+    });
+  }
   LIST_KEYS.forEach(k=>{
     const incoming = data && Array.isArray(data[k]) ? data[k] : [];
     const have = new Set(state[k].map(r=>r.id));
     incoming.forEach(r=>{
       if(r && typeof r === 'object' && r.id != null && !have.has(String(r.id))){
-        state[k].push(cleanRecord(r));
+        state[k].push(k === 'dailyExpenses' ? cleanDaily(r) : cleanRecord(r));
         have.add(String(r.id));
         added++;
       }
     });
   });
+  state.fixedItems.forEach(r=>{ if(!FREQS[r.freq]) r.freq = 'month'; if(r.note == null) r.note = ''; });
   if(data && Array.isArray(data.members)){
     data.members.forEach(m=>{
       if(typeof m === 'string' && m && !state.members.includes(m)) state.members.push(m);
@@ -730,17 +1226,14 @@ function mergeImported(data){
 }
 
 function exportBackup(){
-  const blob = new Blob([JSON.stringify({ app:'budget-app', version:1, exportedAt:new Date().toISOString(), state:state }, null, 2)], { type:'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'budget-backup-' + todayStr() + '.json';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  const blob = new Blob([JSON.stringify({ app:'budget-app', version:STATE_VERSION, exportedAt:new Date().toISOString(), state:state }, null, 2)], { type:'application/json' });
   const n = LIST_KEYS.reduce((s,k)=>s+state[k].length,0);
-  setBackupMsg('已匯出備份檔（共 ' + n + ' 筆紀錄）');
+  deliverFile(blob, 'budget-backup-' + todayStr() + '.json').then(res=>{
+    if(res === 'cancelled') return;
+    setBackupMsg(res === 'shared'
+      ? '已開啟分享選單，請選「儲存到檔案」保存備份（共 ' + n + ' 筆紀錄）'
+      : '已匯出備份檔（共 ' + n + ' 筆紀錄）');
+  });
 }
 
 function setBackupMsg(t){
@@ -848,10 +1341,12 @@ function renderSettingsTab(){
   };
   document.querySelectorAll('[data-del-cat]').forEach(b=>{
     b.onclick = ()=>{
-      if(!confirm(`確定要刪除「${b.dataset.delCat}」這個類別嗎？`)) return;
-      delete state.categories[b.dataset.delCat];
-      saveState();
-      render();
+      const cat = b.dataset.delCat;
+      askConfirm(`確定要刪除「${cat}」這個類別嗎？`, '刪除', ()=>{
+        delete state.categories[cat];
+        saveState();
+        render();
+      });
     };
   });
   document.querySelectorAll('[data-del-item]').forEach(b=>{
@@ -880,11 +1375,11 @@ function renderSettingsTab(){
 function render(){
   renderTabs();
   if(activeTab==='overview') renderOverviewTab();
-  else if(activeTab==='fixed') renderSimpleCostTab('fixedMonthly', {title:'固定月費', hint:'填每月固定要付的費用（訂閱、房租等），自動換算成每日成本（月費 ÷ 30）。', amountLabel:'月費', divisor:30});
-  else if(activeTab==='annual') renderSimpleCostTab('annualItems', {title:'年度花費', hint:'填一年繳一次的費用（保險、牌照稅、年費會員等），自動換算成每日成本（年費 ÷ 365）。', amountLabel:'年費', divisor:365});
+  else if(activeTab==='fixed') renderFixedTab();
   else if(activeTab==='variable') renderVariableTab();
   else if(activeTab==='daily') renderDailyTab();
   else if(activeTab==='income') renderIncomeTab();
+  else if(activeTab==='treasure') renderTreasureTab();
   else if(activeTab==='settings') renderSettingsTab();
 }
 
