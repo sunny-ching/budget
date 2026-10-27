@@ -287,6 +287,14 @@
     max-width:380px; width:100%;
     box-shadow:0 8px 30px rgba(0,0,0,0.25);
   }
+  .edit-btn{
+    background:none; border:1px solid var(--green-deep); color:var(--green-deep);
+    border-radius:5px; font-size:12px; padding:2px 8px; cursor:pointer; white-space:nowrap; margin-right:4px;
+  }
+  .edit-btn:hover{ background:var(--green-deep); color:#fff; }
+  .dlg-box.wide{ max-width:460px; max-height:90vh; overflow-y:auto; }
+  .edit-form{ display:flex; flex-direction:column; gap:10px; margin-bottom:14px; }
+  .edit-form .field input, .edit-form .field select{ width:100%; }
   .dlg-msg{ margin:0 0 16px; font-size:15px; line-height:1.7; }
   .dlg-actions{ display:flex; gap:8px; justify-content:flex-end; }
 </style>
@@ -303,7 +311,7 @@
 
 <script>
 const STORAGE_KEY = 'budget-app-state-v1';
-const STATE_VERSION = 4;
+const STATE_VERSION = 7;
 
 const DEFAULT_CATEGORIES = {
   "餐飲": ["早餐","午餐","晚餐","飲料","零食"],
@@ -323,7 +331,7 @@ const BANK_ACCOUNT = '銀行';   // 固定要選銀行別，不能取消
 const DEFAULT_BANK_ACCOUNTS = ['銀行','信用卡','行動支付'];
 const DEFAULT_ACCOUNTS = ['現金','銀行','信用卡','行動支付'];
 const DEFAULT_BANKS = ['台灣銀行','中國信託','玉山銀行','國泰世華','台新銀行','郵局'];
-const LIST_KEYS = ['fixedItems','variableItems','dailyExpenses','incomes'];
+const LIST_KEYS = ['fixedItems','fixedIncomes','variableItems','dailyExpenses','incomes'];
 // 固定花費的繳費頻率 → 換算成每日成本的除數
 const FREQS = { month:{label:'每月', days:30}, week:{label:'每週', days:7}, year:{label:'每年', days:365} };
 
@@ -343,6 +351,7 @@ function localDateStr(d){ d = d || new Date(); return d.getFullYear() + '-' + pa
 function todayStr(){ return localDateStr(); }
 function thisMonthStr(){ return todayStr().slice(0,7); }
 function money(n){ return 'NT$' + Math.round(n||0).toLocaleString('zh-TW'); }
+function signedMoney(n){ return (Math.round(n||0) < 0 ? '−' : '') + money(Math.abs(n||0)); }
 function moneyF(n){ return 'NT$' + (n||0).toLocaleString('zh-TW', {maximumFractionDigits:1}); }
 function daysInMonthsOfYear(y){ let n=0; for(let m=1;m<=12;m++) n+=daysInMonth(y+'-'+String(m).padStart(2,'0')); return n; }
 function daysInMonth(ym){ const [y,m]=ym.split('-').map(Number); return new Date(y,m,0).getDate(); }
@@ -359,6 +368,7 @@ function defaultState(){
     bankAccounts: DEFAULT_BANK_ACCOUNTS.slice(),
     banks: DEFAULT_BANKS.slice(),
     fixedItems: [],
+    fixedIncomes: [],
     variableItems: [],
     dailyExpenses: [],
     incomes: []
@@ -398,6 +408,36 @@ function notice(message){
   document.getElementById('dlg-yes').onclick = closeDialog;
 }
 
+// 固定花費／固定收入的欄位整理：
+//  day = 日期（每月幾號，1–31，可空白）；startMonth = 從哪個月開始計入（新增當月，舊資料空白＝每個月都計入）
+//  舊版把完整日期存在 date：轉成 startMonth + day
+function normalizeFixed(r){
+  if(!FREQS[r.freq]) r.freq = 'month';
+  if(r.note == null) r.note = '';
+  let legacyMonth = '';
+  if(r.date != null){
+    const m = String(r.date).match(/^(\d{4}-(\d{2}))(?:-(\d{2}))?$/);
+    if(m){
+      if(!r.startMonth) r.startMonth = m[1];
+      if(m[3] && !(Array.isArray(r.days) && r.days.length)) r.days = [Number(m[3])];
+      legacyMonth = Number(m[2]);
+    }
+    delete r.date;
+  }
+  if(r.day != null && r.day !== ''){                       // 上一版的單一「幾號」
+    if(!(Array.isArray(r.days) && r.days.length)) r.days = [Number(r.day)];
+  }
+  delete r.day;
+  const lo = r.freq === 'week' ? 0 : 1, hi = r.freq === 'week' ? 6 : 31;
+  let days = (Array.isArray(r.days) ? r.days : []).map(Number).filter(d=>Number.isInteger(d) && d >= lo && d <= hi);
+  days = Array.from(new Set(days));
+  if(r.freq === 'year') days = days.slice(0,1);
+  r.days = days.sort((x,y)=> (r.freq==='week' ? (x||7)-(y||7) : x-y));   // 週日(0)排最後
+  const mo = Number(r.month);
+  r.month = r.freq === 'year' ? (Number.isInteger(mo) && mo >= 1 && mo <= 12 ? mo : (legacyMonth || '')) : '';
+  if(Array.isArray(r.revisions)) r.revisions.forEach(v=>{ v.n = Math.max(1, Number(v.n) || 1); v.days = Array.isArray(v.days) ? v.days.map(Number).filter(Number.isInteger) : []; });
+  if(r.startMonth != null && !/^\d{4}-\d{2}$/.test(String(r.startMonth))) delete r.startMonth;
+}
 // 舊版的「固定月費」「年度花費」轉成統一格式
 function legacyFixedToItems(list, freq){
   return (Array.isArray(list) ? list : []).filter(r=>r && typeof r === 'object' && r.id != null).map(r=>({
@@ -423,7 +463,7 @@ function migrateState(legacy){
       if(!have.has(r.id)){ state.fixedItems.push(r); have.add(r.id); }
     });
   }
-  state.fixedItems.forEach(r=>{ if(!FREQS[r.freq]) r.freq = 'month'; if(r.note == null) r.note = ''; });
+  state.fixedItems.concat(state.fixedIncomes).forEach(normalizeFixed);
   // v4: 帳戶別 / 銀行別選單（舊紀錄的帳戶欄位留空）
   if(!state.accounts.length) state.accounts = DEFAULT_ACCOUNTS.slice();
   if(!state.bankAccounts.includes(BANK_ACCOUNT)) state.bankAccounts.push(BANK_ACCOUNT);
@@ -546,6 +586,7 @@ function isTreasureRow(r){
 const TABS = [
   {id:'overview', label:'總覽與建議'},
   {id:'fixed', label:'固定花費'},
+  {id:'fixedIncome', label:'固定收入'},
   {id:'variable', label:'彈性消耗品'},
   {id:'daily', label:'每日花費'},
   {id:'income', label:'收入'},
@@ -563,35 +604,276 @@ function renderTabs(){
   });
 }
 
-// ---------- 固定花費（每月 / 每週 / 每年） ----------
+// ---------- 修改：每一筆交易都能開啟表單修改 ----------
+function bindEditButtons(listKey){
+  document.querySelectorAll('[data-edit]').forEach(b=>{
+    b.onclick = ()=> openEdit(listKey, b.dataset.edit);
+  });
+}
+// 下拉選單：若紀錄裡的值已不在選單中（例如選單項目被刪掉了），仍保留它，避免修改時被默默改掉
+function selectWith(values, selected){
+  const list = values.slice();
+  if(selected && !list.includes(selected)) list.push(selected);
+  return list.map(v=>`<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(v)}</option>`).join('');
+}
+function openEdit(listKey, id){
+  const r = state[listKey].find(x=>String(x.id)===String(id));
+  if(!r) return;
+  const val = k => r[k] == null ? '' : r[k];
+  const inp = (key, label, type, extra) => `<div class="field"><label>${label}</label><input type="${type}" id="ed-${key}" value="${esc(val(key))}" ${extra||''}></div>`;
+  const catField = `<div class="field"><label>類別</label><select id="ed-category">${selectWith(Object.keys(state.categories), r.category)}</select></div>`;
+  const itemField = `<div class="field"><label>${listKey==='variableItems'?'品項':'項目'}</label><select id="ed-item">${selectWith(state.categories[r.category] || [], r.item)}</select></div>`;
+  const amountField = inp('amount','金額','number','min="0" inputmode="decimal"');
+  const noteField = `<div class="field"><label>備註</label><input type="text" id="ed-note" value="${esc(val('note'))}"></div>`;
+  const accountFields = `<div class="field"><label>帳戶別</label><select id="ed-account"><option value="">（未指定）</option>${selectWith(state.accounts, r.account)}</select></div>
+    <div class="field" id="ed-bank-field" hidden><label>銀行別</label><select id="ed-bank"><option value="">（未選擇）</option>${selectWith(state.banks, r.bank)}</select></div>`;
+  let title = '修改', body = '';
+  const isFixed = listKey === 'fixedItems' || listKey === 'fixedIncomes';
+  if(isFixed){
+    title = listKey === 'fixedItems' ? '修改固定花費' : '修改固定收入';
+    body = (listKey === 'fixedItems' ? catField + itemField
+        : `<div class="field"><label>類型</label><select id="ed-type">${selectWith(INCOME_TYPES, r.type)}</select></div>`) +
+      `<div class="field"><label>頻率</label><select id="ed-freq">${Object.keys(FREQS).map(k=>`<option value="${k}" ${k===r.freq?'selected':''}>${FREQS[k].label}</option>`).join('')}</select></div>` +
+      `<div class="field wide" id="ed-daypicker"></div>` +
+      amountField +
+      `<div class="field"><label>金額／頻率從哪個月開始套用</label><input type="month" id="ed-effective" value="${thisMonthStr()}"></div>
+       <p class="hint" style="margin:0;">調整金額或頻率時，只會從這個月往後生效，更早的月份與年度維持原本的數字。（日期選了幾天，就算幾次；只改類別、日期內容相同、帳戶、備註不受影響。）</p>` +
+      accountFields + noteField;
+  } else if(listKey === 'variableItems'){
+    title = '修改彈性消耗品';
+    body = catField + itemField + inp('buyDate','購買日期','date') + amountField + inp('nextBuyDate','下次購買日期（選填）','date') + accountFields + noteField;
+  } else if(listKey === 'dailyExpenses'){
+    title = '修改每日花費';
+    const mem = Array.isArray(r.members) ? r.members : [];
+    const allMembers = state.members.concat(mem.filter(m=>!state.members.includes(m)));
+    body = inp('date','日期','date') + catField + itemField + amountField +
+      `<div class="field"><label>成員（可複選）</label><div class="chk-list">${allMembers.map(m=>
+        `<label class="chk"><input type="checkbox" name="ed-members" value="${esc(m)}" ${mem.includes(m)?'checked':''}>${esc(m)}</label>`).join('')}</div></div>` +
+      accountFields + noteField;
+    if(r.splitDate) body = `<p class="hint" style="margin:0;">這筆已在 ${esc(r.splitDate)} 分攤給晴（${moneyF(r.splitAmount)}）。修改後不會自動重算已分攤的金額；要重算請先到「晴的寶庫」取消那天的分攤。</p>` + body;
+  } else {
+    title = '修改收入';
+    body = inp('date','日期','date') +
+      `<div class="field"><label>成員</label><select id="ed-member"><option value="">（不指定）</option>${selectWith(state.members, r.member)}</select></div>` +
+      `<div class="field"><label>類型</label><select id="ed-type">${selectWith(INCOME_TYPES, r.type)}</select></div>` +
+      amountField + accountFields + noteField;
+  }
+  const d = document.getElementById('dialog');
+  d.innerHTML = `<div class="dlg-box wide" role="dialog" aria-modal="true">
+    <p class="dlg-msg" style="margin-bottom:10px;"><strong>${title}</strong></p>
+    <div class="edit-form">${body}</div>
+    <div class="dlg-actions">
+      <button class="btn secondary" id="ed-cancel" type="button">取消</button>
+      <button class="btn" id="ed-save" type="button">儲存</button>
+    </div></div>`;
+  d.hidden = false;
+
+  const el = id => document.getElementById(id);
+  const syncBank = ()=>{ el('ed-bank-field').hidden = !needsBank(el('ed-account').value); };
+  el('ed-account').onchange = syncBank;
+  syncBank();
+  const hasCat = listKey === 'fixedItems' || listKey === 'variableItems' || listKey === 'dailyExpenses', hasDate = listKey === 'dailyExpenses' || listKey === 'incomes', hasBuy = listKey === 'variableItems';
+  if(hasCat){
+    el('ed-category').onchange = (e)=>{ el('ed-item').innerHTML = itemOptions(e.target.value); };
+  }
+  if(isFixed){
+    mountDayPicker('ed', r.freq, r);
+    el('ed-freq').onchange = (e)=>{ mountDayPicker('ed', FREQS[e.target.value] ? e.target.value : 'month', null); };
+  }
+  el('ed-cancel').onclick = closeDialog;
+  el('ed-save').onclick = ()=>{
+    const amount = Number(el('ed-amount').value);
+    const needDate = hasDate ? el('ed-date').value : true;
+    const needBuy = hasBuy ? el('ed-buyDate').value : true;
+    if(!amount || !needDate || !needBuy){ notice(isFixed ? '請填寫金額' : '請填寫日期與金額'); return; }
+    if(isFixed){
+      const eff = el('ed-effective').value || thisMonthStr();
+      const freq = FREQS[el('ed-freq').value] ? el('ed-freq').value : 'month';
+      const pk = readDayPicker('ed', freq);
+      reviseFixed(r, amount, freq, eff, freq === 'year' ? 1 : Math.max(1, pk.days.length), pk.days);
+      r.days = pk.days; r.month = pk.month;
+      normalizeFixed(r);
+      if(listKey === 'fixedIncomes') r.type = el('ed-type').value;
+    } else {
+      r.amount = amount;
+    }
+    r.note = el('ed-note').value.trim();
+    r.account = el('ed-account').value;
+    r.bank = needsBank(r.account) ? el('ed-bank').value : '';
+    if(hasCat){ r.category = el('ed-category').value; r.item = el('ed-item').value; }
+    if(hasDate) r.date = el('ed-date').value;
+    if(listKey === 'variableItems'){ r.buyDate = el('ed-buyDate').value; r.nextBuyDate = el('ed-nextBuyDate').value; }
+    if(listKey === 'dailyExpenses') r.members = Array.from(document.querySelectorAll('input[name="ed-members"]:checked')).map(x=>x.value);
+    if(listKey === 'incomes'){ r.member = el('ed-member').value; r.type = el('ed-type').value; }
+    saveState();
+    closeDialog();
+    render();
+  };
+}
+
+// ---------- 固定花費／固定收入（每月 / 每週 / 每年） ----------
+// 每筆可有「調整紀錄」revisions：[{from:'YYYY-MM', amount, freq}]，調整只從指定月份往後生效，過去的月份維持原值。
+// startMonth 是開始計入的月份（新增當月）：之前的月份不計入；舊資料沒有就每個月都計入。day 只是每月幾號的日期欄。
+// n＝每個週期發生幾次：每週／每月可複選多個日期（每個日期各算一次），每年固定 1 次
+function nOf(r){
+  if(r.freq === 'year') return 1;
+  return Math.max(1, Array.isArray(r.days) ? r.days.length : 0);
+}
 function fixedDailyOf(r){
   const f = FREQS[r.freq] || FREQS.month;
-  return Number(r.amount||0) / f.days;
+  return Number(r.amount||0) * nOf(r) / f.days;
 }
-function renderFixedTab(){
-  const rows = state.fixedItems;
-  const totalDaily = rows.reduce((s,r)=>s+fixedDailyOf(r),0);
-  let html = `<h2>固定花費</h2><p class="hint">填固定要付的費用（房租、訂閱、保險、牌照稅等），選擇頻率後自動換算成每日成本（每月 ÷ 30、每週 ÷ 7、每年 ÷ 365）。</p>`;
-  html += `<table><thead><tr><th>類別</th><th>項目</th><th>頻率</th><th class="num">金額</th><th class="num">每日成本</th><th>帳戶</th><th>備註</th><th></th></tr></thead><tbody>`;
+function fixedValueAt(r, ym){
+  if(r.startMonth && String(r.startMonth) > ym) return null;
+  const revs = Array.isArray(r.revisions) ? r.revisions : [];
+  if(!revs.length) return { amount:Number(r.amount)||0, freq:FREQS[r.freq]?r.freq:'month', n:nOf(r), days:Array.isArray(r.days)?r.days.slice():[] };
+  let pick = null;
+  revs.forEach(v=>{ if(v.from <= ym) pick = v; });
+  return pick ? { amount:Number(pick.amount)||0, freq:FREQS[pick.freq]?pick.freq:'month', n:Math.max(1, Number(pick.n)||1), days:Array.isArray(pick.days)?pick.days:[] } : null;
+}
+// 固定花費（總覽用）：每月＝金額（不會因為當月 28／31 天而變動）、每週＝金額 × 當月天數 ÷ 7、每年＝金額 ÷ 12
+function fixedCostForMonth(ym){
+  return state.fixedItems.reduce((s,r)=>{
+    const v = fixedValueAt(r, ym);
+    return v ? s + monthlyEquivalent(v, ym) : s;
+  }, 0);
+}
+// 固定收入：每月＝金額、每週＝金額 × 當月天數 ÷ 7、每年＝金額 ÷ 12
+// 這個月（依日曆）實際有幾天是所選的星期幾（0＝週日 … 6＝週六）
+function countWeekdaysInMonth(ym, weekdays){
+  const [y, m] = ym.split('-').map(Number);
+  const dim = daysInMonth(ym);
+  let c = 0;
+  for(let d=1; d<=dim; d++){ if(weekdays.includes(new Date(y, m-1, d).getDay())) c++; }
+  return c;
+}
+function monthlyEquivalent(v, ym){
+  const n = v.n || 1;
+  if(v.freq === 'week'){
+    if(Array.isArray(v.days) && v.days.length) return v.amount * countWeekdaysInMonth(ym, v.days);   // 查日曆：該月實際有幾個週幾
+    return v.amount * daysInMonth(ym) / 7;                                                            // 沒選星期：以當月天數 ÷ 7 估算
+  }
+  if(v.freq === 'year') return v.amount / 12;
+  return v.amount * n;
+}
+function fixedIncomeForMonth(ym){
+  const byType = {};
+  let total = 0;
+  state.fixedIncomes.forEach(r=>{
+    const v = fixedValueAt(r, ym);
+    if(!v) return;
+    const x = monthlyEquivalent(v, ym);
+    total += x;
+    const t = (r.type || '其他') + '（固定）';
+    byType[t] = (byType[t]||0) + x;
+  });
+  return { total, byType };
+}
+// 調整金額／頻率：從 effMonth 起套用，之前的月份保持原值
+function reviseFixed(r, amount, freq, effMonth, n, days){
+  days = Array.isArray(days) ? days : [];
+  const sameDays = freq !== 'week' || (Array.isArray(r.days) ? r.days : []).join() === days.join();
+  if(Number(r.amount) === amount && r.freq === freq && nOf(r) === n && sameDays) return;
+  const base = r.startMonth ? String(r.startMonth) : '0000-00';
+  let revs = Array.isArray(r.revisions) ? r.revisions.slice() : [];
+  if(!revs.length) revs = [{ from:base, amount:Number(r.amount)||0, freq:FREQS[r.freq]?r.freq:'month', n:nOf(r), days:Array.isArray(r.days)?r.days.slice():[] }];
+  revs.sort((x,y)=>x.from.localeCompare(y.from));
+  if(effMonth <= revs[0].from){
+    revs = [{ from:revs[0].from, amount, freq, n, days }];      // 生效月份不晚於起點：整段都是新值
+  } else {
+    revs = revs.filter(v=>v.from < effMonth);          // 之後（含同月）的舊調整被新值取代
+    revs.push({ from:effMonth, amount, freq, n, days });
+  }
+  r.revisions = revs;
+  r.amount = amount;
+  r.freq = freq;
+}
+// ---- 日期選擇（仿「規律記帳時間」）：每週選星期、每月選日期（可複選、可全選）、每年選月＋日 ----
+const WEEKDAYS = [['週一',1],['週二',2],['週三',3],['週四',4],['週五',5],['週六',6],['週日',0]];
+function dayPickerInner(prefix, freq, r){
+  const sel = r && Array.isArray(r.days) ? r.days.map(Number) : [];
+  if(freq === 'year'){
+    const mo = r && r.month ? Number(r.month) : '';
+    let mOpts = '<option value="">（月）</option>', dOpts = '<option value="">（日）</option>';
+    for(let i=1;i<=12;i++) mOpts += `<option value="${i}" ${i===mo?'selected':''}>${i} 月</option>`;
+    for(let i=1;i<=31;i++) dOpts += `<option value="${i}" ${sel[0]===i?'selected':''}>${i} 日</option>`;
+    return `<label>日期（每年幾月幾日）</label><div class="chk-list"><select id="${prefix}-month">${mOpts}</select><select id="${prefix}-yday">${dOpts}</select></div>`;
+  }
+  const items = freq === 'week' ? WEEKDAYS : Array.from({length:31}, (_,i)=>[(i+1)+' 日', i+1]);
+  return `<label>日期（${freq==='week'?'每週星期幾':'每月幾日'}，可複選）</label>
+    <div><button type="button" class="btn secondary small" id="${prefix}-allpick">全選</button></div>
+    <div class="chk-list">${items.map(([t,v])=>
+      `<label class="chk"><input type="checkbox" name="${prefix}-days" value="${v}" ${sel.includes(v)?'checked':''}>${t}</label>`).join('')}</div>`;
+}
+function mountDayPicker(prefix, freq, r){
+  const box = document.getElementById(prefix + '-daypicker');
+  box.innerHTML = dayPickerInner(prefix, freq, r);
+  const all = document.getElementById(prefix + '-allpick');
+  if(all) all.onclick = ()=>{
+    const boxes = Array.from(document.querySelectorAll(`input[name="${prefix}-days"]`));
+    const every = boxes.length > 0 && boxes.every(b=>b.checked);
+    boxes.forEach(b=>{ b.checked = !every; });
+  };
+}
+function readDayPicker(prefix, freq){
+  if(freq === 'year'){
+    const mo = Number(document.getElementById(prefix + '-month').value);
+    const d = Number(document.getElementById(prefix + '-yday').value);
+    return { days: Number.isInteger(d) && d >= 1 ? [d] : [], month: Number.isInteger(mo) && mo >= 1 ? mo : '' };
+  }
+  const days = Array.from(document.querySelectorAll(`input[name="${prefix}-days"]:checked`)).map(x=>Number(x.value));
+  return { days, month: '' };
+}
+function fixedDaysLabel(r){
+  const days = Array.isArray(r.days) ? r.days : [];
+  if(r.freq === 'year') return r.month && days.length ? `${r.month} 月 ${days[0]} 日` : '—';
+  if(!days.length) return '—';
+  if(r.freq === 'week') return days.map(d=>(WEEKDAYS.find(w=>w[1]===d)||['?'])[0]).join('、');
+  return days.length >= 28 ? `每月 ${days.length} 天` : days.map(d=>d+' 日').join('、');
+}
+
+function renderFixedListTab(listKey){
+  const isIncome = listKey === 'fixedIncomes';
+  const rows = state[listKey];
+  const thisYm = thisMonthStr();
+  const totalCol = rows.reduce((s,r)=> s + (isIncome ? monthlyEquivalent({amount:Number(r.amount)||0, freq:r.freq, n:nOf(r), days:r.days}, thisYm) : fixedDailyOf(r)), 0);
+  const title = isIncome ? '固定收入' : '固定花費';
+  let html = `<h2>${title}</h2><p class="hint">${isIncome
+    ? '填固定會進來的收入（薪水、房租收入、定期利息等），選擇頻率後，總覽會每個月自動算入（每月＝金額、每週＝金額×該月依日曆實際有幾個所選的星期、每年＝金額÷12）。已經列在這裡的收入，請不要再重複記到「收入」分頁。'
+    : '填固定要付的費用（房租、訂閱、保險、牌照稅等）。總覽會每個月自動算入：每月＝金額、每週＝金額×該月依日曆實際有幾個所選的星期（沒選星期才用當月天數÷7估算）、每年＝金額÷12；表格的「每日成本」是參考用的換算（每月 ÷ 30、每週 ÷ 7、每年 ÷ 365）。'}</p>
+  <p class="hint">「日期」選填：每週選星期、每月選幾日（可複選，每個日期各算一次）、每年選月日。新增的項目從新增當月開始計入，不會回頭影響過去的月份；之後用「修改」調整金額或頻率時，也只會從你指定的月份往後生效，過去的月份與年度維持原本的數字。</p>`;
+  const head = isIncome
+    ? `<th>類型</th><th>頻率</th><th>日期</th><th class="num">金額</th><th class="num">每月約</th>`
+    : `<th>類別</th><th>項目</th><th>頻率</th><th>日期</th><th class="num">金額</th><th class="num">每日成本</th>`;
+  const ncols = isIncome ? 8 : 9;
+  html += `<table><thead><tr>${head}<th>帳戶</th><th>備註</th><th></th></tr></thead><tbody>`;
   if(rows.length===0){
-    html += `<tr><td colspan="8" class="empty">尚無資料，請在下方新增</td></tr>`;
+    html += `<tr><td colspan="${ncols}" class="empty">尚無資料，請在下方新增</td></tr>`;
   }
   rows.forEach(r=>{
+    const revs = Array.isArray(r.revisions) ? r.revisions : [];
+    const since = revs.length > 1 ? ` <small>（${esc(revs[revs.length-1].from)} 起）</small>` : '';
+    const calc = isIncome ? moneyF(monthlyEquivalent({amount:Number(r.amount)||0, freq:r.freq, n:nOf(r), days:r.days}, thisYm)) : moneyF(fixedDailyOf(r));
     html += `<tr>
-      <td>${esc(r.category)}</td><td>${esc(r.item)}</td><td>${esc((FREQS[r.freq]||FREQS.month).label)}</td>
-      <td class="num">${money(r.amount)}</td><td class="num">${moneyF(fixedDailyOf(r))}</td>
+      ${isIncome ? `<td>${esc(r.type)}</td>` : `<td>${esc(r.category)}</td><td>${esc(r.item)}</td>`}
+      <td>${esc((FREQS[r.freq]||FREQS.month).label)}</td>
+      <td>${esc(fixedDaysLabel(r))}</td>
+      <td class="num">${money(r.amount)}${since}</td><td class="num">${calc}</td>
       <td>${accountLabel(r)}</td>
       <td>${esc(r.note||'')}</td>
-      <td><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
+      <td style="white-space:nowrap;"><button class="edit-btn" data-edit="${esc(r.id)}">修改</button><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
     </tr>`;
   });
-  html += `<tr class="total-row"><td colspan="4">加總</td><td class="num">${moneyF(totalDaily)}</td><td></td><td></td><td></td></tr>`;
+  html += `<tr class="total-row"><td colspan="${isIncome?4:5}">加總</td><td class="num">${moneyF(totalCol)}</td><td></td><td></td><td></td></tr>`;
   html += `</tbody></table>`;
   html += `<div class="add-row">
-    <div class="field"><label>類別</label><select id="new-cat">${catOptions()}</select></div>
-    <div class="field"><label>項目</label><select id="new-item">${itemOptions(Object.keys(state.categories)[0])}</select></div>
+    ${isIncome
+      ? `<div class="field"><label>類型</label><select id="new-type">${INCOME_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>`
+      : `<div class="field"><label>類別</label><select id="new-cat">${catOptions()}</select></div>
+         <div class="field"><label>項目</label><select id="new-item">${itemOptions(Object.keys(state.categories)[0])}</select></div>`}
     <div class="field"><label>頻率</label><div class="chk-list">${Object.keys(FREQS).map((k,i)=>
       `<label class="chk"><input type="radio" name="new-freq" value="${k}"${i===0?' checked':''}> ${FREQS[k].label}</label>`).join('')}</div></div>
+    <div class="field wide" id="new-daypicker"></div>
     <div class="field"><label>金額</label><input type="number" id="new-amount" min="0" inputmode="decimal" placeholder="0"></div>
     ${accountFieldsHtml()}
     <div class="field wide"><label>備註</label><input type="text" id="new-note" placeholder="選填"></div>
@@ -599,25 +881,34 @@ function renderFixedTab(){
   </div>`;
   document.getElementById('content').innerHTML = html;
   bindAccountFields();
+  const curFreq = ()=>{ const p = document.querySelector('input[name="new-freq"]:checked'); return p && FREQS[p.value] ? p.value : 'month'; };
+  mountDayPicker('new', 'month');
+  document.querySelectorAll('input[name="new-freq"]').forEach(rad=>{ rad.onchange = ()=> mountDayPicker('new', curFreq()); });
 
-  document.getElementById('new-cat').onchange = (e)=>{
-    document.getElementById('new-item').innerHTML = itemOptions(e.target.value);
-  };
+  if(!isIncome){
+    document.getElementById('new-cat').onchange = (e)=>{
+      document.getElementById('new-item').innerHTML = itemOptions(e.target.value);
+    };
+  }
   document.getElementById('new-add').onclick = ()=>{
-    const cat = document.getElementById('new-cat').value;
-    const item = document.getElementById('new-item').value;
     const amount = Number(document.getElementById('new-amount').value);
     const picked = document.querySelector('input[name="new-freq"]:checked');
     const freq = picked && FREQS[picked.value] ? picked.value : 'month';
     const note = document.getElementById('new-note').value.trim();
     if(!amount){ notice('請填寫金額'); return; }
-    state.fixedItems.push({id:uid(), category:cat, item, amount, freq, note, ...readAccountFields()});
+    const picked2 = readDayPicker('new', freq);
+    const rec = { id:uid(), amount, freq, days:picked2.days, month:picked2.month, startMonth:thisMonthStr(), note, ...readAccountFields() };
+    normalizeFixed(rec);
+    if(isIncome){ rec.type = document.getElementById('new-type').value; }
+    else { rec.category = document.getElementById('new-cat').value; rec.item = document.getElementById('new-item').value; }
+    state[listKey].push(rec);
     saveState();
     render();
   };
+  bindEditButtons(listKey);
   document.querySelectorAll('[data-del]').forEach(b=>{
     b.onclick = ()=>{
-      state.fixedItems = state.fixedItems.filter(r=>r.id!==b.dataset.del);
+      state[listKey] = state[listKey].filter(r=>r.id!==b.dataset.del);
       saveState();
       render();
     };
@@ -651,7 +942,7 @@ function renderVariableTab(){
       <td class="num">${dailyText}</td>
       <td>${accountLabel(r)}</td>
       <td>${esc(r.note||'')}</td>
-      <td><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
+      <td style="white-space:nowrap;"><button class="edit-btn" data-edit="${esc(r.id)}">修改</button><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
     </tr>`;
   });
   html += `<tr class="total-row"><td colspan="5">加總（已知每日成本）</td><td class="num">${moneyF(knownTotal)}</td><td></td><td></td><td></td></tr>`;
@@ -691,6 +982,7 @@ function renderVariableTab(){
       render();
     };
   });
+  bindEditButtons('variableItems');
   document.querySelectorAll('[data-del]').forEach(b=>{
     b.onclick = ()=>{
       state.variableItems = state.variableItems.filter(r=>r.id!==b.dataset.del);
@@ -717,7 +1009,7 @@ function renderDailyTab(){
       <td>${esc(r.note||'')}${r.splitDate?` <span class="split-tag">已分攤 ${esc(r.splitDate)}</span>`:''}</td>
       <td>${accountLabel(r)}</td>
       <td class="num">${money(r.amount)}</td>
-      <td><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
+      <td style="white-space:nowrap;"><button class="edit-btn" data-edit="${esc(r.id)}">修改</button><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
     </tr>`;
   });
   html += `<tr class="total-row"><td colspan="6">加總</td><td class="num">${money(total)}</td><td></td></tr>`;
@@ -750,6 +1042,7 @@ function renderDailyTab(){
     saveState();
     render();
   };
+  bindEditButtons('dailyExpenses');
   document.querySelectorAll('[data-del]').forEach(b=>{
     b.onclick = ()=>{
       const id = b.dataset.del;
@@ -784,7 +1077,7 @@ function renderIncomeTab(){
       <td>${esc(r.type)}</td><td>${esc(r.note||'')}</td>
       <td>${accountLabel(r)}</td>
       <td class="num">${money(r.amount)}</td>
-      <td><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
+      <td style="white-space:nowrap;"><button class="edit-btn" data-edit="${esc(r.id)}">修改</button><button class="del-btn" data-del="${esc(r.id)}">刪除</button></td>
     </tr>`;
   });
   html += `<tr class="total-row"><td colspan="5">加總</td><td class="num">${money(total)}</td><td></td></tr>`;
@@ -812,6 +1105,7 @@ function renderIncomeTab(){
     saveState();
     render();
   };
+  bindEditButtons('incomes');
   document.querySelectorAll('[data-del]').forEach(b=>{
     b.onclick = ()=>{
       state.incomes = state.incomes.filter(r=>r.id!==b.dataset.del);
@@ -1119,16 +1413,21 @@ function exportTreasureExcel(date){
 let overviewMonth = thisMonthStr();
 let overviewMode = 'month';            // 'month' | 'year'
 let overviewYear = thisMonthStr().slice(0,4);
-function recurringDailyNow(){
-  const fixedDaily = state.fixedItems.reduce((s,r)=>s+fixedDailyOf(r),0);
-  const variableDaily = state.variableItems.reduce((s,r)=>{
+function variableDailyNow(){
+  return state.variableItems.reduce((s,r)=>{
     if(r.nextBuyDate){
       const days = (new Date(r.nextBuyDate) - new Date(r.buyDate)) / 86400000;
       if(days > 0) return s + Number(r.amount)/days;
     }
     return s;
   },0);
-  return { fixedDaily, variableDaily, total: fixedDaily+variableDaily };
+}
+// 某個月的固定支出（依當時生效的金額）＋ 彈性消耗品，以及固定收入
+function monthRecurring(ym, variableDaily){
+  return fixedCostForMonth(ym) + variableDaily * daysInMonth(ym);
+}
+function monthsOf(prefix){
+  return prefix.length === 4 ? Array.from({length:12}, (_,i)=> prefix + '-' + String(i+1).padStart(2,'0')) : [prefix];
 }
 function renderOverviewTab(){
   const isYear = overviewMode === 'year';
@@ -1138,15 +1437,23 @@ function renderOverviewTab(){
   const periodDays = isYear ? (daysInMonthsOfYear(overviewYear)) : daysInMonth(overviewMonth);
   const sum = list => list.reduce((s,r)=>s+Number(r.amount||0),0);
 
-  const rec = recurringDailyNow();
-  const recurringDailyTotal = rec.total;
+  const variableDaily = variableDailyNow();
+  const periodMonths = monthsOf(prefix);
+  const recurringTotal = periodMonths.reduce((s,ym)=> s + monthRecurring(ym, variableDaily), 0);
+  const recurringDailyTotal = recurringTotal / periodDays;
+  const fixedInc = periodMonths.reduce((acc,ym)=>{
+    const x = fixedIncomeForMonth(ym);
+    acc.total += x.total;
+    Object.entries(x.byType).forEach(([t,v])=>{ acc.byType[t] = (acc.byType[t]||0) + v; });
+    return acc;
+  }, { total:0, byType:{} });
 
   const monthDaily = state.dailyExpenses.filter(r=>String(r.date).startsWith(prefix));
   const monthDailyTotal = sum(monthDaily);
-  const monthExpenseEstimate = recurringDailyTotal*periodDays + monthDailyTotal;
+  const monthExpenseEstimate = recurringTotal + monthDailyTotal;
 
   const monthIncomes = state.incomes.filter(r=>String(r.date).startsWith(prefix));
-  const monthIncomeTotal = sum(monthIncomes);
+  const monthIncomeTotal = sum(monthIncomes) + fixedInc.total;
 
   const savings = monthIncomeTotal - monthExpenseEstimate;
   const ratio = monthIncomeTotal>0 ? savings/monthIncomeTotal : null;
@@ -1154,6 +1461,7 @@ function renderOverviewTab(){
   // income breakdown by type
   const incomeByType = {};
   monthIncomes.forEach(r=>{ incomeByType[r.type] = (incomeByType[r.type]||0) + Number(r.amount); });
+  Object.entries(fixedInc.byType).forEach(([t,v])=>{ incomeByType[t] = (incomeByType[t]||0) + v; });
 
   // member breakdown for daily expenses: a shared expense is split equally between its members
   const memberSpend = {};
@@ -1163,12 +1471,19 @@ function renderOverviewTab(){
     ms.forEach(m=>{ memberSpend[m] = (memberSpend[m]||0) + share; });
   });
 
-  const years = new Set([thisMonthStr().slice(0,4), overviewYear]);
-  state.dailyExpenses.concat(state.incomes).forEach(r=>{ const y = String(r.date||'').slice(0,4); if(/^\d{4}$/.test(y)) years.add(y); });
-  const yearOpts = Array.from(years).sort().map(y=>`<option value="${y}" ${y===overviewYear?'selected':''}>${y} 年</option>`).join('');
+  // 年度選單：涵蓋有資料的年份，並預留前 2 年到後 30 年，跟月份選單一樣可以看到明年
+  const thisYear = Number(thisMonthStr().slice(0,4));
+  let lo = thisYear - 2, hi = thisYear + 30;
+  state.dailyExpenses.concat(state.incomes).forEach(r=>{
+    const y = Number(String(r.date||'').slice(0,4));
+    if(y >= 1900 && y <= 2200){ lo = Math.min(lo, y); hi = Math.max(hi, y); }
+  });
+  lo = Math.min(lo, Number(overviewYear)); hi = Math.max(hi, Number(overviewYear));
+  let yearOpts = '';
+  for(let y = lo; y <= hi; y++) yearOpts += `<option value="${y}" ${String(y)===overviewYear?'selected':''}>${y} 年</option>`;
 
   let html = `<h2>總覽與建議</h2>
-  <p class="hint">固定花費、彈性消耗品只要設定一次，之後每個月都會自動套用；每日花費和收入依你選的${isYear?'年度':'月份'}自動彙整。</p>
+  <p class="hint">固定收入、固定花費、彈性消耗品只要設定一次，之後每個月都會自動套用（調整只往後生效，過去月份不變）；每日花費和收入依你選的${isYear?'年度':'月份'}自動彙整。</p>
   <div class="add-row" style="border-top:none;padding-top:0;margin-bottom:12px;">
     <div class="field"><label>檢視方式</label><select id="view-mode"><option value="month" ${isYear?'':'selected'}>月份</option><option value="year" ${isYear?'selected':''}>年度</option></select></div>
     ${isYear
@@ -1179,6 +1494,7 @@ function renderOverviewTab(){
   html += `<div class="grid2">
     <div class="stat"><div class="label">${label} 收入合計</div><div class="value">${money(monthIncomeTotal)}</div></div>
     <div class="stat"><div class="label">${label} 支出估計</div><div class="value">${money(monthExpenseEstimate)}</div></div>
+    <div class="stat"><div class="label">${label} 淨額（收入－支出）</div><div class="value" id="net-value" style="color:${savings<0?'var(--red)':'var(--green-deep)'};">${signedMoney(savings)}</div></div>
     <div class="stat"><div class="label">固定花費＋消耗品（每日）</div><div class="value">${moneyF(recurringDailyTotal)}</div></div>
     <div class="stat"><div class="label">${isYear?'全年':'當月'}已記錄花費</div><div class="value">${money(monthDailyTotal)}</div></div>
   </div>`;
@@ -1227,17 +1543,17 @@ function renderOverviewTab(){
   if(isYear){
     // 12 個月的逐月明細
     html += `<h2 style="margin-top:26px;">${overviewYear} 年逐月明細</h2>
-    <table><thead><tr><th>月份</th><th class="num">收入</th><th class="num">每日花費</th><th class="num">固定＋消耗品</th><th class="num">支出估計</th><th class="num">結餘</th></tr></thead><tbody>`;
+    <table><thead><tr><th>月份</th><th class="num">收入</th><th class="num">每日花費</th><th class="num">固定＋消耗品</th><th class="num">支出估計</th><th class="num">淨額</th></tr></thead><tbody>`;
     let tInc=0, tDaily=0, tRec=0;
     for(let m=1;m<=12;m++){
       const ym = overviewYear + '-' + String(m).padStart(2,'0');
-      const inc = sum(state.incomes.filter(r=>String(r.date).startsWith(ym)));
+      const inc = sum(state.incomes.filter(r=>String(r.date).startsWith(ym))) + fixedIncomeForMonth(ym).total;
       const dl = sum(state.dailyExpenses.filter(r=>String(r.date).startsWith(ym)));
-      const rc = recurringDailyTotal*daysInMonth(ym);
+      const rc = monthRecurring(ym, variableDaily);
       tInc+=inc; tDaily+=dl; tRec+=rc;
-      html += `<tr><td>${m} 月</td><td class="num">${money(inc)}</td><td class="num">${money(dl)}</td><td class="num">${money(rc)}</td><td class="num">${money(dl+rc)}</td><td class="num">${money(inc-dl-rc)}</td></tr>`;
+      html += `<tr><td>${m} 月</td><td class="num">${money(inc)}</td><td class="num">${money(dl)}</td><td class="num">${money(rc)}</td><td class="num">${money(dl+rc)}</td><td class="num">${signedMoney(inc-dl-rc)}</td></tr>`;
     }
-    html += `<tr class="total-row"><td>全年</td><td class="num">${money(tInc)}</td><td class="num">${money(tDaily)}</td><td class="num">${money(tRec)}</td><td class="num">${money(tDaily+tRec)}</td><td class="num">${money(tInc-tDaily-tRec)}</td></tr></tbody></table>`;
+    html += `<tr class="total-row"><td>全年</td><td class="num">${money(tInc)}</td><td class="num">${money(tDaily)}</td><td class="num">${money(tRec)}</td><td class="num">${money(tDaily+tRec)}</td><td class="num">${signedMoney(tInc-tDaily-tRec)}</td></tr></tbody></table>`;
   }
 
   document.getElementById('content').innerHTML = html;
@@ -1264,10 +1580,18 @@ function renderOverviewTab(){
 // ---------- 備份：匯出與匯入 ----------
 function cleanRecord(r){
   const out = { id: String(r.id) };
-  ['category','item','date','member','type','note','buyDate','nextBuyDate','freq','account','bank'].forEach(k=>{
+  ['category','item','date','member','type','note','buyDate','nextBuyDate','freq','account','bank','startMonth'].forEach(k=>{
     if(r[k] != null) out[k] = String(r[k]);
   });
   out.amount = Number(r.amount) || 0;
+  if(Array.isArray(r.days)) out.days = r.days.map(Number).filter(Number.isInteger);
+  if(r.day != null && r.day !== '') out.day = Number(r.day);
+  if(r.month != null && r.month !== '') out.month = Number(r.month);
+  if(Array.isArray(r.revisions)){
+    out.revisions = r.revisions.filter(v=>v && typeof v === 'object' && /^\d{4}-\d{2}$/.test(String(v.from)))
+      .map(v=>({ from:String(v.from), amount:Number(v.amount)||0, freq:FREQS[v.freq]?v.freq:'month', n:Math.max(1, Number(v.n)||1), days:Array.isArray(v.days)?v.days.map(Number).filter(Number.isInteger):[] }))
+      .sort((a,b)=>a.from.localeCompare(b.from));
+  }
   return out;
 }
 // Daily expenses carry a members list, a note and the split result.
@@ -1306,7 +1630,7 @@ function mergeImported(data){
       }
     });
   });
-  state.fixedItems.forEach(r=>{ if(!FREQS[r.freq]) r.freq = 'month'; if(r.note == null) r.note = ''; });
+  state.fixedItems.concat(state.fixedIncomes).forEach(normalizeFixed);
   if(data && Array.isArray(data.members)){
     data.members.forEach(m=>{
       if(typeof m === 'string' && m && !state.members.includes(m)) state.members.push(m);
@@ -1541,7 +1865,8 @@ function renderSettingsTab(){
 function render(){
   renderTabs();
   if(activeTab==='overview') renderOverviewTab();
-  else if(activeTab==='fixed') renderFixedTab();
+  else if(activeTab==='fixed') renderFixedListTab('fixedItems');
+  else if(activeTab==='fixedIncome') renderFixedListTab('fixedIncomes');
   else if(activeTab==='variable') renderVariableTab();
   else if(activeTab==='daily') renderDailyTab();
   else if(activeTab==='income') renderIncomeTab();
